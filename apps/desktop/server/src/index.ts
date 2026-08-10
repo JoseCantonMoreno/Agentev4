@@ -8,6 +8,7 @@ import type {
   LlmProviderConfig,
   LlmProviderName,
   PermissionMode,
+  SavedProviderSettings,
   ToolCall
 } from "@agentev4/shared";
 import {
@@ -24,6 +25,7 @@ import {
   runAgenticLoop
 } from "@agentev4/core";
 import { createStaticToolRegistry, executeRegisteredTool } from "@agentev4/tools";
+import { saveProviderSettings } from "./provider-settings.js";
 import { encodeLine, isRpcRequest, parseLines, type RpcRequest } from "./protocol.js";
 
 const SYSTEM_PROMPT = "You are Agentev4, an autonomous coding agent.";
@@ -36,6 +38,7 @@ interface ServerState {
   workspacePath?: string;
   dbHandle?: DatabaseHandle;
   sessionManager?: SessionManager;
+  providerSettings?: SavedProviderSettings["config"];
   readonly keyStore: KeyStore;
   readonly pendingPermissions: Map<string, (decision: PermissionDecision) => void>;
 }
@@ -90,9 +93,6 @@ async function sendPrompt(
   params: {
     sessionId: string;
     prompt: string;
-    provider: LlmProviderName;
-    model: string;
-    baseUrl?: string;
     disabledTools?: string[];
   },
   emit: (event: AgentIpcEvent) => void
@@ -103,11 +103,12 @@ async function sendPrompt(
 
   sessionManager.appendMessage(params.sessionId, { role: "user", content: params.prompt });
 
+  const config = state.providerSettings;
+  if (!config) throw new Error("No hay configuración de proveedor guardada todavía.");
+
   const providerConfig: LlmProviderConfig = {
-    provider: params.provider,
-    model: params.model,
-    apiKey: state.keyStore.get(params.provider),
-    baseUrl: params.baseUrl
+    ...config,
+    apiKey: state.keyStore.get(config.provider)
   };
   const agent = withThoughtEvents(
     createResilientAgent(createMastraAgentFactory().create(providerConfig), undefined),
@@ -199,6 +200,11 @@ const handlers: Record<string, Handler> = {
     return { ok: true };
   },
   hasApiKey: async (p) => ({ hasKey: state.keyStore.has(cast<{ provider: LlmProviderName }>(p).provider) }),
+  saveProviderSettings: async (p) => {
+    const saved = saveProviderSettings(state.keyStore, p);
+    state.providerSettings = saved.config;
+    return saved;
+  },
   respondPermission: async (p) => {
     const { requestId, decision } = cast<{ requestId: string; decision: PermissionDecision }>(p);
     const resolve = state.pendingPermissions.get(requestId);
@@ -212,9 +218,6 @@ const handlers: Record<string, Handler> = {
       cast<{
         sessionId: string;
         prompt: string;
-        provider: LlmProviderName;
-        model: string;
-        baseUrl?: string;
         disabledTools?: string[];
       }>(p),
       emit
