@@ -38,6 +38,13 @@ interface ServerState extends WorkspaceState {
 }
 
 const state: ServerState = { keyStore: new KeyStore(), pendingPermissions: new Map() };
+const activePrompts = new Set<string>();
+
+function assertNoActivePrompts(): void {
+  if (activePrompts.size > 0) {
+    throw new Error("Hay un prompt activo; espera a que termine antes de cambiar de workspace.");
+  }
+}
 
 function requireSessionManager(): SessionManager {
   if (!state.sessionManager)
@@ -51,8 +58,18 @@ function requireWorkspacePath(): string {
   return state.workspacePath;
 }
 
-async function initWorkspace(params: { workspacePath: unknown }) {
-  return switchWorkspace(state, params.workspacePath);
+async function initWorkspace(params: {
+  workspacePath: unknown;
+  defaultMode: AgentMode;
+  defaultPermissionMode: PermissionMode;
+}) {
+  assertNoActivePrompts();
+  return switchWorkspace(state, params.workspacePath, {
+    defaultMode: params.defaultMode,
+    defaultPermissionMode: params.defaultPermissionMode,
+    listTools: () => Object.keys(createStaticToolRegistry()),
+    beforeCommit: assertNoActivePrompts
+  });
 }
 
 /** Envuelve el `AgentInterface` resiliente para emitir `agent:thought` en cada turno LLM. */
@@ -81,7 +98,7 @@ function bridgedCanUseTool(sessionId: string, emit: (event: AgentIpcEvent) => vo
     });
 }
 
-async function sendPrompt(
+async function executePrompt(
   params: {
     sessionId: string;
     prompt: string;
@@ -156,6 +173,26 @@ async function sendPrompt(
   });
 
   return { haltReason: result.haltReason, turnsUsed: result.turnsUsed };
+}
+
+async function sendPrompt(
+  params: {
+    sessionId: string;
+    prompt: string;
+    disabledTools?: string[];
+  },
+  emit: (event: AgentIpcEvent) => void
+) {
+  if (activePrompts.has(params.sessionId)) {
+    throw new Error(`La sesión "${params.sessionId}" ya tiene un prompt activo.`);
+  }
+
+  activePrompts.add(params.sessionId);
+  try {
+    return await executePrompt(params, emit);
+  } finally {
+    activePrompts.delete(params.sessionId);
+  }
 }
 
 type Handler = (

@@ -50,7 +50,7 @@ export type Action =
   | WorkspaceLifecycleAction
   | { type: "SESSIONS_SET"; sessions: SessionConfig[] }
   | { type: "SESSION_ACTIVATED"; sessionId: string | null; messages: AgentMessage[] }
-  | { type: "MESSAGES_SET"; messages: AgentMessage[] }
+  | { type: "MESSAGES_SET"; sessionId: string; messages: AgentMessage[] }
   | { type: "SENDING_SET"; sending: boolean }
   | { type: "SETTINGS_TOGGLE" }
   | { type: "ERROR_SET"; error: string | null }
@@ -92,6 +92,7 @@ function hasLoadedWorkspace(state: AppState): boolean {
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "WORKSPACE_SELECTION_STARTED":
+      if (state.sending) return state;
       return { ...state, workspaceStatus: "selecting", error: null };
     case "WORKSPACE_SELECTION_CANCELLED":
       return {
@@ -99,8 +100,10 @@ export function reducer(state: AppState, action: Action): AppState {
         workspaceStatus: hasLoadedWorkspace(state) ? "ready" : "idle"
       };
     case "WORKSPACE_PREPARING":
+      if (state.sending) return state;
       return { ...state, workspaceStatus: "preparing", error: null };
     case "WORKSPACE_READY":
+      if (state.sending) return state;
       return {
         ...state,
         workspacePath: action.ready.workspacePath,
@@ -122,8 +125,10 @@ export function reducer(state: AppState, action: Action): AppState {
         error: action.error
       };
     case "SESSIONS_SET":
+      if (state.sending) return state;
       return { ...state, sessions: action.sessions };
     case "SESSION_ACTIVATED":
+      if (state.sending) return state;
       return {
         ...state,
         activeSessionId: action.sessionId,
@@ -133,6 +138,7 @@ export function reducer(state: AppState, action: Action): AppState {
         context: null
       };
     case "MESSAGES_SET":
+      if (action.sessionId !== state.activeSessionId) return state;
       return { ...state, messages: action.messages };
     case "SENDING_SET":
       return { ...state, sending: action.sending };

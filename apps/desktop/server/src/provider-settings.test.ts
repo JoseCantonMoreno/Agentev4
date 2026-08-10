@@ -5,7 +5,25 @@ import { describe, expect, it, vi } from "vitest";
 import { KeyStore } from "@agentev4/core";
 import { saveProviderSettings } from "./provider-settings.js";
 
-const testState = { providerConfigs: [] as Array<Record<string, unknown>> };
+interface RunLoopResult {
+  messages: unknown[];
+  haltReason: string;
+  turnsUsed: number;
+  costUsd: number;
+}
+
+const testState: {
+  providerConfigs: Array<Record<string, unknown>>;
+  runLoopOverride: ((messages: unknown[]) => Promise<RunLoopResult>) | undefined;
+} = { providerConfigs: [], runLoopOverride: undefined };
+
+function deferred<Value>() {
+  let resolve: (value: Value) => void;
+  const promise = new Promise<Value>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve: resolve! };
+}
 
 function mockServerDependencies(): void {
   vi.doMock("@agentev4/core", () => {
@@ -28,15 +46,32 @@ function mockServerDependencies(): void {
     class TestSessionManager {
       private readonly sessions = new Map<
         string,
-        { id: string; mode: "assistant"; permissionMode: "default" }
+        {
+          id: string;
+          name: string;
+          workspacePath: string;
+          mode: "assistant";
+          permissionMode: "default";
+          status: "active";
+          tokensUsed: number;
+          createdAt: Date;
+          updatedAt: Date;
+        }
       >();
       private readonly messages = new Map<string, Array<{ role: string; content: string }>>();
 
-      createSession(): { id: string; mode: "assistant"; permissionMode: "default" } {
+      createSession(input: { name: string; workspacePath: string }) {
+        const now = new Date("2026-08-10T10:00:00.000Z");
         const session = {
           id: "provider-settings-session",
+          name: input.name,
+          workspacePath: input.workspacePath,
           mode: "assistant" as const,
-          permissionMode: "default" as const
+          permissionMode: "default" as const,
+          status: "active" as const,
+          tokensUsed: 0,
+          createdAt: now,
+          updatedAt: now
         };
         this.sessions.set(session.id, session);
         this.messages.set(session.id, []);
@@ -93,6 +128,7 @@ function mockServerDependencies(): void {
         agent: { run(input: unknown): Promise<{ message: unknown; stopReason: string }> };
         messages: unknown[];
       }) => {
+        if (testState.runLoopOverride) return testState.runLoopOverride(messages);
         const result = await agent.run({ messages });
         return {
           messages: [...messages, result.message],
@@ -121,13 +157,17 @@ function getHandler(handlers: Record<string, unknown>, method: string) {
 
 async function loadHandlers() {
   testState.providerConfigs = [];
+  testState.runLoopOverride = undefined;
   vi.resetModules();
   mockServerDependencies();
   return (await import("./index.js")).handlers;
 }
 
 async function createSession(handlers: Record<string, unknown>, workspacePath: string) {
-  await getHandler(handlers, "initWorkspace")({ workspacePath }, () => undefined);
+  await getHandler(handlers, "initWorkspace")(
+    { workspacePath, defaultMode: "assistant", defaultPermissionMode: "default" },
+    () => undefined
+  );
   return getHandler(handlers, "createSession")(
     { name: "Provider settings test", mode: "assistant", permissionMode: "default" },
     () => undefined
@@ -135,6 +175,63 @@ async function createSession(handlers: Record<string, unknown>, workspacePath: s
 }
 
 describe("saveProviderSettings", () => {
+  it("rejects workspace initialization during a prompt and releases the guard afterwards", async () => {
+    const firstWorkspace = await mkdtemp(join(tmpdir(), "agentev4-active-prompt-a-"));
+    const secondWorkspace = await mkdtemp(join(tmpdir(), "agentev4-active-prompt-b-"));
+    const runStarted = deferred<void>();
+    const finishRun = deferred<void>();
+    try {
+      const handlers = await loadHandlers();
+      const session = await createSession(handlers, firstWorkspace);
+      await getHandler(handlers, "saveProviderSettings")(
+        { provider: "ollama", model: "saved-model", baseUrl: "" },
+        () => undefined
+      );
+      testState.runLoopOverride = async (messages) => {
+        runStarted.resolve();
+        await finishRun.promise;
+        return { messages, haltReason: "end_turn", turnsUsed: 1, costUsd: 0 };
+      };
+
+      const prompt = getHandler(handlers, "sendPrompt")(
+        { sessionId: session.id, prompt: "keep workspace A active" },
+        () => undefined
+      );
+      await runStarted.promise;
+      try {
+        await expect(
+          getHandler(handlers, "initWorkspace")(
+            {
+              workspacePath: secondWorkspace,
+              defaultMode: "assistant",
+              defaultPermissionMode: "default"
+            },
+            () => undefined
+          )
+        ).rejects.toThrow("Hay un prompt activo");
+      } finally {
+        finishRun.resolve();
+        await prompt;
+      }
+
+      await expect(
+        getHandler(handlers, "initWorkspace")(
+          {
+            workspacePath: secondWorkspace,
+            defaultMode: "assistant",
+            defaultPermissionMode: "default"
+          },
+          () => undefined
+        )
+      ).resolves.toMatchObject({ workspacePath: secondWorkspace });
+    } finally {
+      await Promise.all([
+        rm(firstWorkspace, { recursive: true, force: true }),
+        rm(secondWorkspace, { recursive: true, force: true })
+      ]);
+    }
+  });
+
   it("validates everything before storing a new API key", () => {
     const keyStore = new KeyStore();
 

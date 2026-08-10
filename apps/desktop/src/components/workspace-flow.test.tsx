@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatPanel } from "./ChatPanel";
 import { GlobalFeedback } from "./GlobalFeedback";
+import { SessionPanel } from "./SessionPanel";
 import { WorkspaceSelector } from "./WorkspaceSelector";
 import { AppStateProvider, initialState, reducer, useAppState } from "../state/store";
 import type { ReadyWorkspace } from "../lib/workspace";
@@ -55,7 +56,8 @@ function StateSetup({
   withoutSession,
   error,
   notification,
-  followUp
+  followUp,
+  sending
 }: {
   ready?: ReadyWorkspace;
   status?: "selecting" | "preparing";
@@ -63,6 +65,7 @@ function StateSetup({
   error?: string;
   notification?: string;
   followUp?: "cancelled" | "failed";
+  sending?: boolean;
 }) {
   const { dispatch } = useAppState();
 
@@ -85,7 +88,8 @@ function StateSetup({
         type: "NOTIFICATION_SET",
         notification: { id: "saved", kind: "success", message: notification }
       });
-  }, [dispatch, error, followUp, notification, ready, status, withoutSession]);
+    if (sending) dispatch({ type: "SENDING_SET", sending: true });
+  }, [dispatch, error, followUp, notification, ready, sending, status, withoutSession]);
 
   return null;
 }
@@ -119,6 +123,27 @@ afterEach(() => {
 });
 
 describe("workspace-to-chat flow", () => {
+  it("blocks workspace and session navigation controls while a prompt is active", () => {
+    render(
+      <AppStateProvider>
+        <StateSetup ready={readyWorkspaceFixture()} sending />
+        <WorkspaceSelector />
+        <SessionPanel />
+      </AppStateProvider>
+    );
+
+    const controls = [
+      screen.getByRole("button", { name: "C:\\repo" }),
+      screen.getByPlaceholderText("Nombre de la nueva sesi\u00f3n"),
+      screen.getByRole("button", { name: "Nueva" }),
+      screen.getByRole("button", { name: /Sesi\u00f3n de prueba/ }),
+      screen.getByRole("button", { name: "Renombrar" }),
+      screen.getByRole("button", { name: "Eliminar" })
+    ];
+
+    for (const control of controls) expect(control).toHaveProperty("disabled", true);
+  });
+
   it("explains that a workspace must be selected before chat is available", () => {
     render(
       <AppStateProvider>

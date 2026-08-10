@@ -21,6 +21,7 @@ export function WorkspaceSelector() {
   }
 
   async function handleSelect() {
+    if (state.sending) return;
     const selection = controller.current?.select();
     if (!selection) return;
 
@@ -36,7 +37,7 @@ export function WorkspaceSelector() {
     <button
       type="button"
       onClick={() => void handleSelect()}
-      disabled={opening}
+      disabled={opening || state.sending}
       className="flex w-full items-center gap-2 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-800 disabled:opacity-50"
     >
       <FolderOpen size={16} />

@@ -1,7 +1,7 @@
 import { Send, Wrench } from "lucide-react";
 import { useState } from "react";
-import type { AgentMessage } from "@agentev4/shared";
 import { callServer } from "../lib/ipc";
+import { listSessionMessages } from "../lib/workspace";
 import { useAppState } from "../state/store";
 
 export function ChatPanel() {
@@ -21,8 +21,8 @@ export function ChatPanel() {
         prompt: text,
         disabledTools: Array.from(state.disabledTools)
       });
-      const messages = await callServer<AgentMessage[]>("listMessages", { sessionId });
-      dispatch({ type: "MESSAGES_SET", messages });
+      const messages = await listSessionMessages(sessionId);
+      dispatch({ type: "MESSAGES_SET", sessionId, messages });
     } catch (error) {
       dispatch({
         type: "ERROR_SET",

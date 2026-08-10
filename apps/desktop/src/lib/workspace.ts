@@ -1,4 +1,11 @@
-import type { AgentMessage, AgentMode, PermissionMode, SessionConfig } from "@agentev4/shared";
+import {
+  AgentMessageSchema,
+  SessionConfigSchema,
+  type AgentMessage,
+  type AgentMode,
+  type PermissionMode,
+  type SessionConfig
+} from "@agentev4/shared";
 import { callServer } from "./ipc";
 
 export interface ReadyWorkspace {
@@ -20,19 +27,38 @@ export interface WorkspaceSelectionController {
   select(): Promise<void> | undefined;
 }
 
-interface InitializedWorkspace {
-  workspacePath: string;
-  sessions: SessionConfig[];
-}
+function parseReadyWorkspace(value: unknown): ReadyWorkspace {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("El servidor devolvió un workspace inválido.");
+  }
 
-function compareSessions(left: SessionConfig, right: SessionConfig): number {
-  const updatedAtDifference = right.updatedAt.getTime() - left.updatedAt.getTime();
-  if (updatedAtDifference !== 0) return updatedAtDifference;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.workspacePath !== "string") {
+    throw new Error("El servidor devolvió una ruta de workspace inválida.");
+  }
+  if (typeof candidate.activeSessionId !== "string") {
+    throw new Error("El servidor devolvió una sesión activa inválida.");
+  }
+  if (
+    !Array.isArray(candidate.tools) ||
+    !candidate.tools.every((tool) => typeof tool === "string")
+  ) {
+    throw new Error("El servidor devolvió un catálogo de herramientas inválido.");
+  }
 
-  const createdAtDifference = right.createdAt.getTime() - left.createdAt.getTime();
-  if (createdAtDifference !== 0) return createdAtDifference;
+  const sessions = SessionConfigSchema.array().parse(candidate.sessions);
+  const messages = AgentMessageSchema.array().parse(candidate.messages);
+  if (!sessions.some((session) => session.id === candidate.activeSessionId)) {
+    throw new Error("La sesión activa no pertenece al workspace preparado.");
+  }
 
-  return left.id.localeCompare(right.id);
+  return {
+    workspacePath: candidate.workspacePath,
+    sessions,
+    activeSessionId: candidate.activeSessionId,
+    messages,
+    tools: candidate.tools
+  };
 }
 
 export async function prepareWorkspace(input: {
@@ -42,33 +68,36 @@ export async function prepareWorkspace(input: {
   call?: typeof callServer;
 }): Promise<ReadyWorkspace> {
   const call = input.call ?? callServer;
-  const initialized = await call<InitializedWorkspace>("initWorkspace", {
-    workspacePath: input.workspacePath
+  const ready = await call<unknown>("initWorkspace", {
+    workspacePath: input.workspacePath,
+    defaultMode: input.defaultMode,
+    defaultPermissionMode: input.defaultPermissionMode
   });
-  let sessions = [...initialized.sessions].sort(compareSessions);
+  return parseReadyWorkspace(ready);
+}
 
-  if (sessions.length === 0) {
-    const created = await call<SessionConfig>("createSession", {
-      name: "Sesi\u00f3n de prueba",
-      mode: input.defaultMode,
-      permissionMode: input.defaultPermissionMode
-    });
-    sessions = [created];
-  }
+export async function listWorkspaceSessions(
+  call: typeof callServer = callServer
+): Promise<SessionConfig[]> {
+  return SessionConfigSchema.array().parse(await call<unknown>("listSessions"));
+}
 
-  const activeSessionId = sessions[0]!.id;
-  const [tools, messages] = await Promise.all([
-    call<string[]>("listTools"),
-    call<AgentMessage[]>("listMessages", { sessionId: activeSessionId })
-  ]);
+export async function createWorkspaceSession(
+  input: {
+    name: string;
+    mode: AgentMode;
+    permissionMode: PermissionMode;
+  },
+  call: typeof callServer = callServer
+): Promise<SessionConfig> {
+  return SessionConfigSchema.parse(await call<unknown>("createSession", input));
+}
 
-  return {
-    workspacePath: initialized.workspacePath,
-    sessions,
-    activeSessionId,
-    messages,
-    tools
-  };
+export async function listSessionMessages(
+  sessionId: string,
+  call: typeof callServer = callServer
+): Promise<AgentMessage[]> {
+  return AgentMessageSchema.array().parse(await call<unknown>("listMessages", { sessionId }));
 }
 
 export function createWorkspaceSelectionController(input: {
