@@ -21,8 +21,10 @@ apps/desktop/src-tauri/gen/
 .env
 .env.local
 
-# Workspace runtime del agente (creado por la app, no versionado)
-.agente/
+# Workspace runtime del agente (creado por la app, no versionado).
+# Excepción: rules.md sí se versiona -- son las reglas reales del proyecto (Fase 13).
+.agente/*
+!.agente/rules.md
 
 # Configuración local de Claude Code (launch.json de preview, etc.)
 .claude/
