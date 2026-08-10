@@ -15,11 +15,22 @@ export const AgentToolCallEventSchema = z.object({
 });
 export type AgentToolCallEvent = z.infer<typeof AgentToolCallEventSchema>;
 
+export const ContextBreakdownSchema = z.object({
+  systemPrompt: z.number().int().nonnegative(),
+  rules: z.number().int().nonnegative(),
+  tools: z.number().int().nonnegative(),
+  history: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative()
+});
+export type ContextBreakdown = z.infer<typeof ContextBreakdownSchema>;
+
 export const AgentContextUpdateEventSchema = z.object({
   type: z.literal("agent:context_update"),
   sessionId: z.string(),
   usedTokens: z.number().int().nonnegative(),
-  maxTokens: z.number().int().positive()
+  maxTokens: z.number().int().positive(),
+  /** Desglose por componente (Fase 7); opcional para no romper emisores existentes. */
+  breakdown: ContextBreakdownSchema.optional()
 });
 export type AgentContextUpdateEvent = z.infer<typeof AgentContextUpdateEventSchema>;
 
