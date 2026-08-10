@@ -59,7 +59,7 @@ export type Action =
   | { type: "NOTIFICATION_CLEAR"; id: string }
   | { type: "SERVER_EVENT"; event: AgentIpcEvent }
   | { type: "PERMISSION_RESOLVED" }
-  | { type: "PROVIDER_CONFIG_SET"; config: Partial<ProviderConfig> }
+  | { type: "PROVIDER_CONFIG_COMMITTED"; config: ProviderConfig }
   | { type: "TOOLS_SET"; tools: string[] }
   | { type: "TOOL_TOGGLED"; tool: string }
   | { type: "DEFAULTS_SET"; mode?: AgentMode; permissionMode?: PermissionMode };
@@ -148,8 +148,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return state.notification?.id === action.id ? { ...state, notification: null } : state;
     case "PERMISSION_RESOLVED":
       return { ...state, pendingPermission: null };
-    case "PROVIDER_CONFIG_SET":
-      return { ...state, providerConfig: { ...state.providerConfig, ...action.config } };
+    case "PROVIDER_CONFIG_COMMITTED":
+      return { ...state, providerConfig: action.config };
     case "TOOLS_SET":
       return { ...state, availableTools: action.tools };
     case "TOOL_TOGGLED": {

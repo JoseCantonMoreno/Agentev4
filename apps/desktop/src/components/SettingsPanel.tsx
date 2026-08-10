@@ -1,6 +1,6 @@
 import { KeyRound, X } from "lucide-react";
-import { useEffect, useState } from "react";
-import type { AgentMode, LlmProviderName, PermissionMode } from "@agentev4/shared";
+import { useEffect, useRef, useState } from "react";
+import type { AgentMode, LlmProviderName, PermissionMode, SavedProviderSettings } from "@agentev4/shared";
 import { callServer } from "../lib/ipc";
 import { useAppState } from "../state/store";
 
@@ -8,28 +8,75 @@ const PROVIDERS: LlmProviderName[] = ["anthropic", "openai", "gemini", "ollama",
 const AGENT_MODES: AgentMode[] = ["assistant", "agent", "plan"];
 const PERMISSION_MODES: PermissionMode[] = ["default", "dontAsk", "acceptEdits", "plan", "bypassPermissions", "auto"];
 
+interface ProviderDraft {
+  provider: LlmProviderName;
+  model: string;
+  baseUrl: string;
+  apiKey: string;
+}
+
 export function SettingsPanel() {
   const { state, dispatch } = useAppState();
-  const [apiKey, setApiKey] = useState("");
+  const [draft, setDraft] = useState<ProviderDraft>({ ...state.providerConfig, apiKey: "" });
   const [hasKey, setHasKey] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const hasKeyRequest = useRef(0);
 
   useEffect(() => {
     if (!state.settingsOpen) return;
-    callServer<{ hasKey: boolean }>("hasApiKey", { provider: state.providerConfig.provider })
-      .then((result) => setHasKey(result.hasKey))
-      .catch(() => setHasKey(false));
-  }, [state.settingsOpen, state.providerConfig.provider]);
+    setDraft({ ...state.providerConfig, apiKey: "" });
+  }, [state.settingsOpen]);
+
+  useEffect(() => {
+    if (!state.settingsOpen) return;
+    const requestId = ++hasKeyRequest.current;
+    callServer<{ hasKey: boolean }>("hasApiKey", { provider: draft.provider })
+      .then((result) => {
+        if (requestId === hasKeyRequest.current) setHasKey(result.hasKey);
+      })
+      .catch(() => {
+        if (requestId === hasKeyRequest.current) setHasKey(false);
+      });
+  }, [draft.provider, state.settingsOpen]);
 
   if (!state.settingsOpen) return null;
 
-  async function handleSaveKey() {
-    if (!apiKey) return;
-    await callServer("setApiKey", { provider: state.providerConfig.provider, apiKey });
-    setApiKey("");
-    setHasKey(true);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+  async function handleSave() {
+    const model = draft.model.trim();
+    if (!model) {
+      dispatch({ type: "ERROR_SET", error: "El modelo es obligatorio." });
+      return;
+    }
+
+    setSaving(true);
+    dispatch({ type: "ERROR_SET", error: null });
+    try {
+      const result = await callServer<SavedProviderSettings>("saveProviderSettings", {
+        provider: draft.provider,
+        model,
+        baseUrl: draft.baseUrl.trim(),
+        ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {})
+      });
+      dispatch({
+        type: "PROVIDER_CONFIG_COMMITTED",
+        config: { ...result.config, baseUrl: result.config.baseUrl ?? "" }
+      });
+      hasKeyRequest.current += 1;
+      setDraft((current) => ({ ...current, apiKey: "" }));
+      setHasKey(result.hasApiKey);
+      dispatch({
+        type: "NOTIFICATION_SET",
+        notification: {
+          id: crypto.randomUUID(),
+          kind: "success",
+          message: "Configuración guardada correctamente"
+        }
+      });
+    } catch (error) {
+      dispatch({ type: "ERROR_SET", error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -44,11 +91,12 @@ export function SettingsPanel() {
 
         <section className="flex flex-col gap-2">
           <h3 className="text-sm font-medium text-neutral-300">Proveedor LLM</h3>
+          <label htmlFor="provider" className="text-sm text-neutral-300">Proveedor</label>
           <select
-            value={state.providerConfig.provider}
-            onChange={(event) =>
-              dispatch({ type: "PROVIDER_CONFIG_SET", config: { provider: event.target.value as LlmProviderName } })
-            }
+            id="provider"
+            value={draft.provider}
+            onChange={(event) => setDraft((current) => ({ ...current, provider: event.target.value as LlmProviderName }))}
+            disabled={saving}
             className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
           >
             {PROVIDERS.map((provider) => (
@@ -57,36 +105,45 @@ export function SettingsPanel() {
               </option>
             ))}
           </select>
+          <label htmlFor="model" className="text-sm text-neutral-300">Modelo</label>
           <input
-            value={state.providerConfig.model}
-            onChange={(event) => dispatch({ type: "PROVIDER_CONFIG_SET", config: { model: event.target.value } })}
+            id="model"
+            value={draft.model}
+            onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))}
+            disabled={saving}
             placeholder="Modelo (ej. claude-sonnet-5)"
             className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
           />
+          <label htmlFor="base-url" className="text-sm text-neutral-300">Base URL</label>
           <input
-            value={state.providerConfig.baseUrl}
-            onChange={(event) => dispatch({ type: "PROVIDER_CONFIG_SET", config: { baseUrl: event.target.value } })}
+            id="base-url"
+            value={draft.baseUrl}
+            onChange={(event) => setDraft((current) => ({ ...current, baseUrl: event.target.value }))}
+            disabled={saving}
             placeholder="Base URL (opcional, ollama/openrouter/groq)"
             className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
           />
-
           <div className="flex items-center gap-2">
             <KeyRound size={14} className={hasKey ? "text-emerald-500" : "text-neutral-500"} />
+            <label htmlFor="api-key" className="sr-only">API key</label>
             <input
+              id="api-key"
               type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
+              value={draft.apiKey}
+              onChange={(event) => setDraft((current) => ({ ...current, apiKey: event.target.value }))}
+              disabled={saving}
               placeholder={hasKey ? "Clave configurada (RAM) — sobrescribir" : "API key"}
               className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
             />
-            <button
-              type="button"
-              onClick={() => void handleSaveKey()}
-              className="rounded-md bg-emerald-700 px-2 py-1 text-sm hover:bg-emerald-600"
-            >
-              {saved ? "OK" : "Guardar"}
-            </button>
           </div>
+          <button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={saving}
+            className="rounded-md bg-emerald-700 px-2 py-1 text-sm hover:bg-emerald-600 disabled:opacity-50"
+          >
+            {saving ? "Guardando…" : "Guardar configuración"}
+          </button>
         </section>
 
         <section className="flex flex-col gap-2">

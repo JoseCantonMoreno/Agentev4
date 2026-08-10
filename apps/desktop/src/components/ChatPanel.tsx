@@ -19,9 +19,6 @@ export function ChatPanel() {
       await callServer("sendPrompt", {
         sessionId,
         prompt: text,
-        provider: state.providerConfig.provider,
-        model: state.providerConfig.model,
-        baseUrl: state.providerConfig.baseUrl || undefined,
         disabledTools: Array.from(state.disabledTools)
       });
       const messages = await callServer<AgentMessage[]>("listMessages", { sessionId });
