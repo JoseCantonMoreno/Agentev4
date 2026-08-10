@@ -27,7 +27,7 @@ export interface AgentLoopResult {
   costUsd: number;
 }
 
-function toolResultMessage(result: ToolResult): AgentMessage {
+export function toolResultMessage(result: ToolResult): AgentMessage {
   return {
     id: result.toolCallId,
     role: "tool",

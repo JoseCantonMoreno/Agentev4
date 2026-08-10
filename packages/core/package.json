@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@agentev4/shared": "workspace:*",
+    "@agentev4/tools": "workspace:*",
     "@ai-sdk/anthropic": "^4.0.36",
     "@ai-sdk/google": "^4.0.39",
     "@ai-sdk/openai-compatible": "^3.0.28",
