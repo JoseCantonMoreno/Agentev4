@@ -13,3 +13,5 @@ export * from "./durable/done-condition.js";
 export * from "./durable/evaluator.js";
 export * from "./durable/long-running-harness.js";
 export * from "./skills/skill-loader.js";
+export * from "./resilience/retry.js";
+export * from "./security/key-store.js";
