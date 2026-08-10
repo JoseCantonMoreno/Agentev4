@@ -1,0 +1,10 @@
+{
+  "name": "@agentev4/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@agentev4/core": "workspace:*",
+    "@agentev4/shared": "workspace:*"
+  }
+}

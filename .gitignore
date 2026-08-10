@@ -1,1 +1,17 @@
 COMANDOS-GIT.md
+
+# Especificación privada del proyecto: no debe subirse al remoto
+prompt.md
+
+# Dependencias y artefactos de build
+node_modules/
+dist/
+.turbo/
+
+# Logs y entornos locales
+*.log
+.env
+.env.local
+
+# Workspace runtime del agente (creado por la app, no versionado)
+.agente/
