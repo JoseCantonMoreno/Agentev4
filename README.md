@@ -25,10 +25,22 @@ Repo inicializado con flujo obligatorio de pull request en `main` (ver
 
 ```bash
 pnpm install
+```
+
+En una terminal, levanta el frontend de desarrollo:
+
+```bash
+pnpm --filter @agentev4/desktop dev
+```
+
+En otra, inicia Tauri:
+
+```bash
 pnpm tauri dev
 ```
 
-Esto compila el sidecar (`apps/desktop/server`) y levanta la app de
+Este segundo comando compila el sidecar (`apps/desktop/server`) y se conecta
+al frontend en `http://localhost:1420` para levantar la app de
 escritorio con recarga en caliente. Al abrir, selecciona una carpeta de
 workspace real, crea una sesión, añade tu clave de proveedor en Ajustes y
 manda un prompt.
