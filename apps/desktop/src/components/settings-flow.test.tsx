@@ -55,7 +55,10 @@ afterEach(() => {
 
 describe("provider settings save flow", () => {
   it("commits provider settings and shows success only after the server confirms", async () => {
-    let confirmSave: (settings: { config: { provider: "openai"; model: string }; hasApiKey: boolean }) => void;
+    let confirmSave: (settings: {
+      config: { provider: "openai"; model: string };
+      hasApiKey: boolean;
+    }) => void;
     vi.mocked(callServer).mockImplementation(async (method) => {
       if (method === "hasApiKey") return { hasKey: false };
       if (method === "saveProviderSettings") {
@@ -76,7 +79,9 @@ describe("provider settings save flow", () => {
     await user.click(screen.getByRole("button", { name: "Guardar configuración" }));
 
     expect(screen.queryByRole("status")).toBeNull();
-    expect((screen.getByRole("button", { name: "Guardando…" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Guardando…" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
     confirmSave!({ config: { provider: "openai", model: "gpt-5" }, hasApiKey: true });
     expect((await screen.findByRole("status")).textContent).toContain(
       "Configuración guardada correctamente"
@@ -111,11 +116,16 @@ describe("provider settings save flow", () => {
     await user.type(screen.getByLabelText("API key"), "sk-retry-secret");
     await user.click(screen.getByRole("button", { name: "Guardar configuración" }));
 
-    expect((await screen.findByRole("status")).textContent).toContain("Configuración guardada correctamente");
+    expect((await screen.findByRole("status")).textContent).toContain(
+      "Configuración guardada correctamente"
+    );
   });
 
   it("synchronizes a reopened panel with the config confirmed while its save was pending", async () => {
-    let confirmSave: (settings: { config: { provider: "openai"; model: string }; hasApiKey: boolean }) => void;
+    let confirmSave: (settings: {
+      config: { provider: "openai"; model: string };
+      hasApiKey: boolean;
+    }) => void;
     vi.mocked(callServer).mockImplementation(async (method) => {
       if (method === "hasApiKey") return { hasKey: false };
       if (method === "saveProviderSettings") {
@@ -137,7 +147,9 @@ describe("provider settings save flow", () => {
     await user.click(screen.getByRole("button", { name: "Alternar ajustes" }));
     expect(screen.queryByLabelText("Modelo")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Alternar ajustes" }));
-    expect((await screen.findByLabelText("Modelo") as HTMLInputElement).value).toBe("claude-sonnet-5");
+    expect(((await screen.findByLabelText("Modelo")) as HTMLInputElement).value).toBe(
+      "claude-sonnet-5"
+    );
 
     confirmSave!({ config: { provider: "openai", model: "model-b" }, hasApiKey: true });
 
@@ -154,7 +166,9 @@ describe("provider settings save flow", () => {
     vi.mocked(callServer).mockImplementation((method, params) => {
       if (method === "hasApiKey") {
         const provider = params?.provider as string;
-        return new Promise<{ hasKey: boolean }>((resolve) => hasKeyResolvers.set(provider, resolve));
+        return new Promise<{ hasKey: boolean }>((resolve) =>
+          hasKeyResolvers.set(provider, resolve)
+        );
       }
       throw new Error(`Unexpected method: ${method}`);
     });
@@ -164,7 +178,9 @@ describe("provider settings save flow", () => {
     await waitFor(() => expect(hasKeyResolvers.has("anthropic")).toBe(true));
     hasKeyResolvers.get("anthropic")!({ hasKey: true });
     await waitFor(() => {
-      expect((screen.getByLabelText("API key") as HTMLInputElement).placeholder).toContain("Clave configurada");
+      expect((screen.getByLabelText("API key") as HTMLInputElement).placeholder).toContain(
+        "Clave configurada"
+      );
     });
 
     await user.selectOptions(screen.getByLabelText("Proveedor"), "openai");
@@ -185,7 +201,10 @@ describe("provider settings save flow", () => {
   });
 
   it("starts one save for synchronous double activation and leaves no secret in serializable state or DOM", async () => {
-    let confirmSave: (settings: { config: { provider: "anthropic"; model: string }; hasApiKey: boolean }) => void;
+    let confirmSave: (settings: {
+      config: { provider: "anthropic"; model: string };
+      hasApiKey: boolean;
+    }) => void;
     vi.mocked(callServer).mockImplementation(async (method) => {
       if (method === "hasApiKey") return { hasKey: false };
       if (method === "saveProviderSettings") {
@@ -206,7 +225,9 @@ describe("provider settings save flow", () => {
       saveButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(vi.mocked(callServer).mock.calls.filter(([method]) => method === "saveProviderSettings")).toHaveLength(1);
+    expect(
+      vi.mocked(callServer).mock.calls.filter(([method]) => method === "saveProviderSettings")
+    ).toHaveLength(1);
     confirmSave!({ config: { provider: "anthropic", model: "claude-sonnet-5" }, hasApiKey: true });
     await screen.findByRole("status");
 

@@ -45,7 +45,7 @@ export function WorkspaceSelector() {
           ? "Preparando workspace…"
           : opening || state.workspaceStatus === "selecting"
             ? "Seleccionando workspace…"
-            : state.workspacePath ?? "Seleccionar carpeta de workspace"}
+            : (state.workspacePath ?? "Seleccionar carpeta de workspace")}
       </span>
     </button>
   );

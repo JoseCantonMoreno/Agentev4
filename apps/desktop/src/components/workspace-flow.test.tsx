@@ -21,8 +21,9 @@ vi.mock("../lib/workspace", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/workspace")>();
   return {
     ...actual,
-    createWorkspaceSelectionController: (input: Parameters<typeof actual.createWorkspaceSelectionController>[0]) =>
-      actual.createWorkspaceSelectionController({ ...input, prepare: prepareWorkspace })
+    createWorkspaceSelectionController: (
+      input: Parameters<typeof actual.createWorkspaceSelectionController>[0]
+    ) => actual.createWorkspaceSelectionController({ ...input, prepare: prepareWorkspace })
   };
 });
 
@@ -48,7 +49,14 @@ function readyWorkspaceFixture(): ReadyWorkspace {
   };
 }
 
-function StateSetup({ ready, status, withoutSession, error, notification, followUp }: {
+function StateSetup({
+  ready,
+  status,
+  withoutSession,
+  error,
+  notification,
+  followUp
+}: {
   ready?: ReadyWorkspace;
   status?: "selecting" | "preparing";
   withoutSession?: boolean;
@@ -72,7 +80,11 @@ function StateSetup({ ready, status, withoutSession, error, notification, follow
       dispatch({ type: "WORKSPACE_PREPARATION_FAILED", error: "No se pudo iniciar el sidecar" });
     }
     if (error) dispatch({ type: "ERROR_SET", error });
-    if (notification) dispatch({ type: "NOTIFICATION_SET", notification: { id: "saved", kind: "success", message: notification } });
+    if (notification)
+      dispatch({
+        type: "NOTIFICATION_SET",
+        notification: { id: "saved", kind: "success", message: notification }
+      });
   }, [dispatch, error, followUp, notification, ready, status, withoutSession]);
 
   return null;
@@ -82,9 +94,16 @@ function TimedNotificationReplacement() {
   const { dispatch } = useAppState();
 
   useEffect(() => {
-    dispatch({ type: "NOTIFICATION_SET", notification: { id: "first", kind: "success", message: "Primera notificación" } });
+    dispatch({
+      type: "NOTIFICATION_SET",
+      notification: { id: "first", kind: "success", message: "Primera notificación" }
+    });
     const replacement = window.setTimeout(
-      () => dispatch({ type: "NOTIFICATION_SET", notification: { id: "second", kind: "success", message: "Notificación de reemplazo" } }),
+      () =>
+        dispatch({
+          type: "NOTIFICATION_SET",
+          notification: { id: "second", kind: "success", message: "Notificación de reemplazo" }
+        }),
       2_999
     );
     return () => window.clearTimeout(replacement);
@@ -158,16 +177,19 @@ describe("workspace-to-chat flow", () => {
     expect(screen.getByText("Selecciona o crea una sesión para empezar.")).not.toBeNull();
   });
 
-  it.each(["cancelled", "failed"] as const)("keeps the session prompt after workspace preparation is %s", (followUp) => {
-    render(
-      <AppStateProvider>
-        <StateSetup ready={readyWorkspaceFixture()} withoutSession followUp={followUp} />
-        <ChatPanel />
-      </AppStateProvider>
-    );
+  it.each(["cancelled", "failed"] as const)(
+    "keeps the session prompt after workspace preparation is %s",
+    (followUp) => {
+      render(
+        <AppStateProvider>
+          <StateSetup ready={readyWorkspaceFixture()} withoutSession followUp={followUp} />
+          <ChatPanel />
+        </AppStateProvider>
+      );
 
-    expect(screen.getByText("Selecciona o crea una sesión para empezar.")).not.toBeNull();
-  });
+      expect(screen.getByText("Selecciona o crea una sesión para empezar.")).not.toBeNull();
+    }
+  );
 
   it("shows initialization errors even when no session exists", async () => {
     selectWorkspaceFolder.mockResolvedValue("C:\\broken");
@@ -183,7 +205,9 @@ describe("workspace-to-chat flow", () => {
 
     await user.click(screen.getByRole("button", { name: /seleccionar carpeta/i }));
 
-    expect((await screen.findByRole("alert")).textContent).toContain("No se pudo iniciar el sidecar");
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "No se pudo iniciar el sidecar"
+    );
   });
 
   it("dismisses successful feedback after three seconds", async () => {
@@ -257,10 +281,12 @@ describe("workspace and notification state", () => {
         reducer(initialState, { type: "WORKSPACE_READY", ready: readyWorkspaceFixture() }),
         { type: "SESSION_ACTIVATED", sessionId: null, messages: [] }
       );
-      const pending = reducer(
-        sessionlessWorkspace,
-        { type: type === "WORKSPACE_SELECTION_CANCELLED" ? "WORKSPACE_SELECTION_STARTED" : "WORKSPACE_PREPARING" }
-      );
+      const pending = reducer(sessionlessWorkspace, {
+        type:
+          type === "WORKSPACE_SELECTION_CANCELLED"
+            ? "WORKSPACE_SELECTION_STARTED"
+            : "WORKSPACE_PREPARING"
+      });
       const resolved = reducer(
         pending,
         type === "WORKSPACE_SELECTION_CANCELLED"

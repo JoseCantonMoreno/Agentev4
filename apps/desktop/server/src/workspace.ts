@@ -1,10 +1,6 @@
 import { mkdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import {
-  type DatabaseHandle,
-  SessionManager,
-  openDatabase
-} from "@agentev4/core";
+import { type DatabaseHandle, SessionManager, openDatabase } from "@agentev4/core";
 import type { SessionConfig } from "@agentev4/shared";
 
 export interface WorkspaceState {

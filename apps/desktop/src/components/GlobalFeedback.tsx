@@ -23,7 +23,10 @@ export function GlobalFeedback() {
   return (
     <div className="fixed right-4 top-4 z-40 flex w-full max-w-sm flex-col gap-2">
       {notification && (
-        <div role="status" className="flex items-start gap-2 rounded-md border border-emerald-700 bg-emerald-950 px-3 py-2 text-sm text-emerald-100">
+        <div
+          role="status"
+          className="flex items-start gap-2 rounded-md border border-emerald-700 bg-emerald-950 px-3 py-2 text-sm text-emerald-100"
+        >
           <CheckCircle2 aria-hidden="true" className="mt-0.5 shrink-0 text-emerald-400" size={16} />
           <p className="flex-1">{notification.message}</p>
           <button
@@ -38,7 +41,10 @@ export function GlobalFeedback() {
       )}
 
       {state.error && (
-        <div role="alert" className="flex items-start gap-2 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100">
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100"
+        >
           <XCircle aria-hidden="true" className="mt-0.5 shrink-0 text-emerald-400" size={16} />
           <p className="flex-1">{state.error}</p>
           <button

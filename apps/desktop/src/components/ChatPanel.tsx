@@ -24,33 +24,55 @@ export function ChatPanel() {
       const messages = await callServer<AgentMessage[]>("listMessages", { sessionId });
       dispatch({ type: "MESSAGES_SET", messages });
     } catch (error) {
-      dispatch({ type: "ERROR_SET", error: error instanceof Error ? error.message : String(error) });
+      dispatch({
+        type: "ERROR_SET",
+        error: error instanceof Error ? error.message : String(error)
+      });
     } finally {
       dispatch({ type: "SENDING_SET", sending: false });
     }
   }
 
   if (state.workspaceStatus === "idle") {
-    return <div className="flex flex-1 items-center justify-center text-neutral-500">Selecciona una carpeta para preparar el agente.</div>;
+    return (
+      <div className="flex flex-1 items-center justify-center text-neutral-500">
+        Selecciona una carpeta para preparar el agente.
+      </div>
+    );
   }
 
   if (state.workspaceStatus === "selecting") {
-    return <div className="flex flex-1 items-center justify-center text-neutral-500">Seleccionando carpeta…</div>;
+    return (
+      <div className="flex flex-1 items-center justify-center text-neutral-500">
+        Seleccionando carpeta…
+      </div>
+    );
   }
 
   if (state.workspaceStatus === "preparing") {
-    return <div className="flex flex-1 items-center justify-center text-neutral-500">Preparando workspace y sesión…</div>;
+    return (
+      <div className="flex flex-1 items-center justify-center text-neutral-500">
+        Preparando workspace y sesión…
+      </div>
+    );
   }
 
   if (!state.activeSessionId) {
-    return <div className="flex flex-1 items-center justify-center text-neutral-500">Selecciona o crea una sesión para empezar.</div>;
+    return (
+      <div className="flex flex-1 items-center justify-center text-neutral-500">
+        Selecciona o crea una sesión para empezar.
+      </div>
+    );
   }
 
   return (
     <div className="flex flex-1 flex-col gap-3 overflow-hidden">
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto rounded-md border border-neutral-800 bg-neutral-900 p-3">
         {state.messages.map((message) => (
-          <div key={message.id} className={`text-sm ${message.role === "user" ? "text-neutral-100" : "text-neutral-300"}`}>
+          <div
+            key={message.id}
+            className={`text-sm ${message.role === "user" ? "text-neutral-100" : "text-neutral-300"}`}
+          >
             <span className="mr-2 font-semibold uppercase text-neutral-500">{message.role}</span>
             <span className="whitespace-pre-wrap">{message.content}</span>
           </div>

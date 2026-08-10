@@ -1,12 +1,31 @@
 import { KeyRound, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { AgentMode, LlmProviderName, PermissionMode, SavedProviderSettings } from "@agentev4/shared";
+import type {
+  AgentMode,
+  LlmProviderName,
+  PermissionMode,
+  SavedProviderSettings
+} from "@agentev4/shared";
 import { callServer } from "../lib/ipc";
 import { useAppState } from "../state/store";
 
-const PROVIDERS: LlmProviderName[] = ["anthropic", "openai", "gemini", "ollama", "openrouter", "groq"];
+const PROVIDERS: LlmProviderName[] = [
+  "anthropic",
+  "openai",
+  "gemini",
+  "ollama",
+  "openrouter",
+  "groq"
+];
 const AGENT_MODES: AgentMode[] = ["assistant", "agent", "plan"];
-const PERMISSION_MODES: PermissionMode[] = ["default", "dontAsk", "acceptEdits", "plan", "bypassPermissions", "auto"];
+const PERMISSION_MODES: PermissionMode[] = [
+  "default",
+  "dontAsk",
+  "acceptEdits",
+  "plan",
+  "bypassPermissions",
+  "auto"
+];
 
 interface ProviderDraft {
   provider: LlmProviderName;
@@ -79,7 +98,10 @@ export function SettingsPanel() {
         }
       });
     } catch (error) {
-      dispatch({ type: "ERROR_SET", error: error instanceof Error ? error.message : String(error) });
+      dispatch({
+        type: "ERROR_SET",
+        error: error instanceof Error ? error.message : String(error)
+      });
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -97,14 +119,20 @@ export function SettingsPanel() {
       <div className="flex h-full w-96 flex-col gap-5 overflow-y-auto border-l border-neutral-800 bg-neutral-950 p-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Ajustes</h2>
-          <button type="button" onClick={() => dispatch({ type: "SETTINGS_TOGGLE" })} className="text-neutral-400 hover:text-neutral-100">
+          <button
+            type="button"
+            onClick={() => dispatch({ type: "SETTINGS_TOGGLE" })}
+            className="text-neutral-400 hover:text-neutral-100"
+          >
             <X size={18} />
           </button>
         </div>
 
         <section className="flex flex-col gap-2">
           <h3 className="text-sm font-medium text-neutral-300">Proveedor LLM</h3>
-          <label htmlFor="provider" className="text-sm text-neutral-300">Proveedor</label>
+          <label htmlFor="provider" className="text-sm text-neutral-300">
+            Proveedor
+          </label>
           <select
             id="provider"
             value={draft.provider}
@@ -118,7 +146,9 @@ export function SettingsPanel() {
               </option>
             ))}
           </select>
-          <label htmlFor="model" className="text-sm text-neutral-300">Modelo</label>
+          <label htmlFor="model" className="text-sm text-neutral-300">
+            Modelo
+          </label>
           <input
             id="model"
             value={draft.model}
@@ -127,23 +157,31 @@ export function SettingsPanel() {
             placeholder="Modelo (ej. claude-sonnet-5)"
             className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
           />
-          <label htmlFor="base-url" className="text-sm text-neutral-300">Base URL</label>
+          <label htmlFor="base-url" className="text-sm text-neutral-300">
+            Base URL
+          </label>
           <input
             id="base-url"
             value={draft.baseUrl}
-            onChange={(event) => setDraft((current) => ({ ...current, baseUrl: event.target.value }))}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, baseUrl: event.target.value }))
+            }
             disabled={saving}
             placeholder="Base URL (opcional, ollama/openrouter/groq)"
             className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
           />
           <div className="flex items-center gap-2">
             <KeyRound size={14} className={hasKey ? "text-emerald-500" : "text-neutral-500"} />
-            <label htmlFor="api-key" className="sr-only">API key</label>
+            <label htmlFor="api-key" className="sr-only">
+              API key
+            </label>
             <input
               id="api-key"
               type="password"
               value={draft.apiKey}
-              onChange={(event) => setDraft((current) => ({ ...current, apiKey: event.target.value }))}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, apiKey: event.target.value }))
+              }
               disabled={saving}
               placeholder={hasKey ? "Clave configurada (RAM) — sobrescribir" : "API key"}
               className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
@@ -160,10 +198,14 @@ export function SettingsPanel() {
         </section>
 
         <section className="flex flex-col gap-2">
-          <h3 className="text-sm font-medium text-neutral-300">Valores por defecto para nuevas sesiones</h3>
+          <h3 className="text-sm font-medium text-neutral-300">
+            Valores por defecto para nuevas sesiones
+          </h3>
           <select
             value={state.defaultMode}
-            onChange={(event) => dispatch({ type: "DEFAULTS_SET", mode: event.target.value as AgentMode })}
+            onChange={(event) =>
+              dispatch({ type: "DEFAULTS_SET", mode: event.target.value as AgentMode })
+            }
             className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
           >
             {AGENT_MODES.map((mode) => (
@@ -174,7 +216,12 @@ export function SettingsPanel() {
           </select>
           <select
             value={state.defaultPermissionMode}
-            onChange={(event) => dispatch({ type: "DEFAULTS_SET", permissionMode: event.target.value as PermissionMode })}
+            onChange={(event) =>
+              dispatch({
+                type: "DEFAULTS_SET",
+                permissionMode: event.target.value as PermissionMode
+              })
+            }
             className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
           >
             {PERMISSION_MODES.map((mode) => (

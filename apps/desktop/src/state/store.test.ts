@@ -25,10 +25,9 @@ const ready: ReadyWorkspace = {
 describe("workspace lifecycle reducer", () => {
   it("preserves the active workspace when folder selection is cancelled", () => {
     const active = reducer(initialState, { type: "WORKSPACE_READY", ready });
-    const cancelled = reducer(
-      reducer(active, { type: "WORKSPACE_SELECTION_STARTED" }),
-      { type: "WORKSPACE_SELECTION_CANCELLED" }
-    );
+    const cancelled = reducer(reducer(active, { type: "WORKSPACE_SELECTION_STARTED" }), {
+      type: "WORKSPACE_SELECTION_CANCELLED"
+    });
 
     expect(cancelled.workspaceStatus).toBe("ready");
     expect(cancelled.workspacePath).toBe("C:\\previous");
@@ -37,10 +36,10 @@ describe("workspace lifecycle reducer", () => {
 
   it("preserves the active workspace and releases busy state after preparation fails", () => {
     const active = reducer(initialState, { type: "WORKSPACE_READY", ready });
-    const failed = reducer(
-      reducer(active, { type: "WORKSPACE_PREPARING" }),
-      { type: "WORKSPACE_PREPARATION_FAILED", error: "init failed" }
-    );
+    const failed = reducer(reducer(active, { type: "WORKSPACE_PREPARING" }), {
+      type: "WORKSPACE_PREPARATION_FAILED",
+      error: "init failed"
+    });
 
     expect(failed.workspaceStatus).toBe("ready");
     expect(failed.workspacePath).toBe("C:\\previous");
