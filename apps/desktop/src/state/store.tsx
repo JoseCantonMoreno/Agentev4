@@ -19,6 +19,12 @@ export interface ProviderConfig {
   baseUrl: string;
 }
 
+export interface AppNotification {
+  id: string;
+  kind: "success";
+  message: string;
+}
+
 export interface AppState {
   workspacePath: string | null;
   workspaceStatus: "idle" | "selecting" | "preparing" | "ready";
@@ -32,6 +38,7 @@ export interface AppState {
   settingsOpen: boolean;
   sending: boolean;
   error: string | null;
+  notification: AppNotification | null;
   providerConfig: ProviderConfig;
   availableTools: string[];
   disabledTools: Set<string>;
@@ -47,6 +54,9 @@ export type Action =
   | { type: "SENDING_SET"; sending: boolean }
   | { type: "SETTINGS_TOGGLE" }
   | { type: "ERROR_SET"; error: string | null }
+  | { type: "ERROR_CLEAR" }
+  | { type: "NOTIFICATION_SET"; notification: AppNotification }
+  | { type: "NOTIFICATION_CLEAR" }
   | { type: "SERVER_EVENT"; event: AgentIpcEvent }
   | { type: "PERMISSION_RESOLVED" }
   | { type: "PROVIDER_CONFIG_SET"; config: Partial<ProviderConfig> }
@@ -67,6 +77,7 @@ export const initialState: AppState = {
   settingsOpen: false,
   sending: false,
   error: null,
+  notification: null,
   providerConfig: { provider: "anthropic", model: "claude-sonnet-5", baseUrl: "" },
   availableTools: [],
   disabledTools: new Set(),
@@ -129,6 +140,12 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, settingsOpen: !state.settingsOpen };
     case "ERROR_SET":
       return { ...state, error: action.error };
+    case "ERROR_CLEAR":
+      return { ...state, error: null };
+    case "NOTIFICATION_SET":
+      return { ...state, notification: action.notification };
+    case "NOTIFICATION_CLEAR":
+      return { ...state, notification: null };
     case "PERMISSION_RESOLVED":
       return { ...state, pendingPermission: null };
     case "PROVIDER_CONFIG_SET":

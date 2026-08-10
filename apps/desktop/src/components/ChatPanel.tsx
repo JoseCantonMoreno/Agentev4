@@ -33,6 +33,18 @@ export function ChatPanel() {
     }
   }
 
+  if (state.workspaceStatus === "idle") {
+    return <div className="flex flex-1 items-center justify-center text-neutral-500">Selecciona una carpeta para preparar el agente.</div>;
+  }
+
+  if (state.workspaceStatus === "selecting") {
+    return <div className="flex flex-1 items-center justify-center text-neutral-500">Seleccionando carpeta…</div>;
+  }
+
+  if (state.workspaceStatus === "preparing") {
+    return <div className="flex flex-1 items-center justify-center text-neutral-500">Preparando workspace y sesión…</div>;
+  }
+
   if (!state.activeSessionId) {
     return <div className="flex flex-1 items-center justify-center text-neutral-500">Selecciona o crea una sesión para empezar.</div>;
   }
@@ -60,11 +72,9 @@ export function ChatPanel() {
           </div>
         )}
       </div>
-
-      {state.error && <div className="rounded-md border border-red-800 bg-red-950/50 p-2 text-xs text-red-300">{state.error}</div>}
-
       <div className="flex gap-2">
         <textarea
+          autoFocus
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={(event) => {

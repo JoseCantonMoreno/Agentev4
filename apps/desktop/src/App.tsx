@@ -1,6 +1,7 @@
 import { Settings } from "lucide-react";
 import { ChatPanel } from "./components/ChatPanel";
 import { ContextGauge } from "./components/ContextGauge";
+import { GlobalFeedback } from "./components/GlobalFeedback";
 import { PermissionModal } from "./components/PermissionModal";
 import { SessionPanel } from "./components/SessionPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -39,6 +40,7 @@ function Shell() {
 
       <SettingsPanel />
       <PermissionModal />
+      <GlobalFeedback />
     </div>
   );
 }
