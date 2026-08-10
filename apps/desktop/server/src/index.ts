@@ -46,12 +46,14 @@ interface ServerState {
 const state: ServerState = { keyStore: new KeyStore(), pendingPermissions: new Map() };
 
 function requireSessionManager(): SessionManager {
-  if (!state.sessionManager) throw new Error("Ningún workspace inicializado todavía (llama a initWorkspace primero).");
+  if (!state.sessionManager)
+    throw new Error("Ningún workspace inicializado todavía (llama a initWorkspace primero).");
   return state.sessionManager;
 }
 
 function requireWorkspacePath(): string {
-  if (!state.workspacePath) throw new Error("Ningún workspace inicializado todavía (llama a initWorkspace primero).");
+  if (!state.workspacePath)
+    throw new Error("Ningún workspace inicializado todavía (llama a initWorkspace primero).");
   return state.workspacePath;
 }
 
@@ -68,7 +70,11 @@ async function initWorkspace(params: { workspacePath: string }) {
 }
 
 /** Envuelve el `AgentInterface` resiliente para emitir `agent:thought` en cada turno LLM. */
-function withThoughtEvents(agent: AgentInterface, sessionId: string, emit: (event: AgentIpcEvent) => void): AgentInterface {
+function withThoughtEvents(
+  agent: AgentInterface,
+  sessionId: string,
+  emit: (event: AgentIpcEvent) => void
+): AgentInterface {
   return {
     async run(input) {
       const result = await agent.run(input);
@@ -101,10 +107,10 @@ async function sendPrompt(
   const session = sessionManager.getSession(params.sessionId);
   if (!session) throw new Error(`Sesión "${params.sessionId}" no existe.`);
 
-  sessionManager.appendMessage(params.sessionId, { role: "user", content: params.prompt });
-
   const config = state.providerSettings;
   if (!config) throw new Error("No hay configuración de proveedor guardada todavía.");
+
+  sessionManager.appendMessage(params.sessionId, { role: "user", content: params.prompt });
 
   const providerConfig: LlmProviderConfig = {
     ...config,
@@ -166,20 +172,33 @@ async function sendPrompt(
   return { haltReason: result.haltReason, turnsUsed: result.turnsUsed };
 }
 
-type Handler = (params: Record<string, unknown> | undefined, emit: (event: AgentIpcEvent) => void) => Promise<unknown>;
+type Handler = (
+  params: Record<string, unknown> | undefined,
+  emit: (event: AgentIpcEvent) => void
+) => Promise<unknown>;
 
 function cast<T>(params: Record<string, unknown> | undefined): T {
   return params as T;
 }
 
-const handlers: Record<string, Handler> = {
+export const handlers: Record<string, Handler> = {
   initWorkspace: (p) => initWorkspace(cast(p)),
   listSessions: async () => requireSessionManager().listSessions(),
-  listMessages: async (p) => requireSessionManager().listMessages(cast<{ sessionId: string }>(p).sessionId),
+  listMessages: async (p) =>
+    requireSessionManager().listMessages(cast<{ sessionId: string }>(p).sessionId),
   listTools: async () => Object.keys(createStaticToolRegistry()),
   createSession: async (p) => {
-    const { name, mode, permissionMode } = cast<{ name: string; mode: AgentMode; permissionMode: PermissionMode }>(p);
-    return requireSessionManager().createSession({ name, mode, permissionMode, workspacePath: requireWorkspacePath() });
+    const { name, mode, permissionMode } = cast<{
+      name: string;
+      mode: AgentMode;
+      permissionMode: PermissionMode;
+    }>(p);
+    return requireSessionManager().createSession({
+      name,
+      mode,
+      permissionMode,
+      workspacePath: requireWorkspacePath()
+    });
   },
   renameSession: async (p) => {
     const { sessionId, name } = cast<{ sessionId: string; name: string }>(p);
@@ -189,7 +208,8 @@ const handlers: Record<string, Handler> = {
     requireSessionManager().deleteSession(cast<{ sessionId: string }>(p).sessionId);
     return { ok: true };
   },
-  listCheckpoints: async (p) => requireSessionManager().listCheckpoints(cast<{ sessionId: string }>(p).sessionId),
+  listCheckpoints: async (p) =>
+    requireSessionManager().listCheckpoints(cast<{ sessionId: string }>(p).sessionId),
   restoreCheckpoint: async (p) => {
     const { sessionId, checkpointId } = cast<{ sessionId: string; checkpointId: string }>(p);
     return requireSessionManager().restoreCheckpoint(sessionId, checkpointId);
@@ -199,7 +219,9 @@ const handlers: Record<string, Handler> = {
     state.keyStore.set(provider, apiKey);
     return { ok: true };
   },
-  hasApiKey: async (p) => ({ hasKey: state.keyStore.has(cast<{ provider: LlmProviderName }>(p).provider) }),
+  hasApiKey: async (p) => ({
+    hasKey: state.keyStore.has(cast<{ provider: LlmProviderName }>(p).provider)
+  }),
   saveProviderSettings: async (p) => {
     const saved = saveProviderSettings(state.keyStore, p);
     state.providerSettings = saved.config;
@@ -208,7 +230,8 @@ const handlers: Record<string, Handler> = {
   respondPermission: async (p) => {
     const { requestId, decision } = cast<{ requestId: string; decision: PermissionDecision }>(p);
     const resolve = state.pendingPermissions.get(requestId);
-    if (!resolve) throw new Error(`No hay una solicitud de permiso pendiente con id "${requestId}".`);
+    if (!resolve)
+      throw new Error(`No hay una solicitud de permiso pendiente con id "${requestId}".`);
     state.pendingPermissions.delete(requestId);
     resolve(decision);
     return { ok: true };

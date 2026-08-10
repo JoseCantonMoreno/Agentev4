@@ -1,6 +1,138 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import { KeyStore } from "@agentev4/core";
 import { saveProviderSettings } from "./provider-settings.js";
+
+const testState = { providerConfigs: [] as Array<Record<string, unknown>> };
+
+function mockServerDependencies(): void {
+  vi.doMock("@agentev4/core", () => {
+    class TestKeyStore {
+      private readonly keys = new Map<string, string>();
+
+      set(provider: string, apiKey: string): void {
+        this.keys.set(provider, apiKey);
+      }
+
+      get(provider: string): string | undefined {
+        return this.keys.get(provider);
+      }
+
+      has(provider: string): boolean {
+        return this.keys.has(provider);
+      }
+    }
+
+    class TestSessionManager {
+      private readonly sessions = new Map<
+        string,
+        { id: string; mode: "assistant"; permissionMode: "default" }
+      >();
+      private readonly messages = new Map<string, Array<{ role: string; content: string }>>();
+
+      createSession(): { id: string; mode: "assistant"; permissionMode: "default" } {
+        const session = {
+          id: "provider-settings-session",
+          mode: "assistant" as const,
+          permissionMode: "default" as const
+        };
+        this.sessions.set(session.id, session);
+        this.messages.set(session.id, []);
+        return session;
+      }
+
+      listSessions() {
+        return [...this.sessions.values()];
+      }
+
+      getSession(sessionId: string) {
+        return this.sessions.get(sessionId);
+      }
+
+      appendMessage(sessionId: string, message: { role: string; content: string }) {
+        this.messages.get(sessionId)?.push(message);
+      }
+
+      listMessages(sessionId: string) {
+        return this.messages.get(sessionId) ?? [];
+      }
+    }
+
+    return {
+      KeyStore: TestKeyStore,
+      SessionManager: TestSessionManager,
+      openDatabase: () => ({ db: {}, close: () => undefined }),
+      PermissionEngine: class {},
+      countContextTokens: () => ({ total: 0 }),
+      createMastraAgentFactory: () => ({
+        create(config: Record<string, unknown>) {
+          testState.providerConfigs.push(config);
+          return {
+            run: async () => ({
+              message: {
+                id: "assistant-message",
+                role: "assistant",
+                content: "configured response",
+                createdAt: new Date()
+              },
+              toolCalls: [],
+              stopReason: "end_turn",
+              costUsd: 0
+            }),
+            submitToolResult: async () => undefined
+          };
+        }
+      }),
+      createResilientAgent: <T>(agent: T) => agent,
+      runAgenticLoop: async ({
+        agent,
+        messages
+      }: {
+        agent: { run(input: unknown): Promise<{ message: unknown; stopReason: string }> };
+        messages: unknown[];
+      }) => {
+        const result = await agent.run({ messages });
+        return {
+          messages: [...messages, result.message],
+          haltReason: result.stopReason,
+          turnsUsed: 1,
+          costUsd: 0
+        };
+      }
+    };
+  });
+
+  vi.doMock("@agentev4/tools", () => ({
+    createStaticToolRegistry: () => ({}),
+    executeRegisteredTool: vi.fn()
+  }));
+}
+
+function getHandler(handlers: Record<string, unknown>, method: string) {
+  const handler = handlers[method];
+  if (typeof handler !== "function") throw new Error(`Missing RPC handler: ${method}`);
+  return handler as (
+    params: Record<string, unknown>,
+    emit: (event: unknown) => void
+  ) => Promise<unknown>;
+}
+
+async function loadHandlers() {
+  testState.providerConfigs = [];
+  vi.resetModules();
+  mockServerDependencies();
+  return (await import("./index.js")).handlers;
+}
+
+async function createSession(handlers: Record<string, unknown>, workspacePath: string) {
+  await getHandler(handlers, "initWorkspace")({ workspacePath }, () => undefined);
+  return getHandler(handlers, "createSession")(
+    { name: "Provider settings test", mode: "assistant", permissionMode: "default" },
+    () => undefined
+  ) as Promise<{ id: string }>;
+}
 
 describe("saveProviderSettings", () => {
   it("validates everything before storing a new API key", () => {
@@ -60,5 +192,56 @@ describe("saveProviderSettings", () => {
       })
     ).toThrow();
     expect(keyStore.get("groq")).toBe("old-secret");
+  });
+
+  it("does not persist a prompt when no provider settings have been saved", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "agentev4-provider-settings-"));
+    try {
+      const handlers = await loadHandlers();
+      const session = await createSession(handlers, workspacePath);
+
+      await expect(
+        getHandler(handlers, "sendPrompt")(
+          { sessionId: session.id, prompt: "do not persist me" },
+          () => undefined
+        )
+      ).rejects.toThrow("No hay configuración de proveedor guardada todavía.");
+      await expect(
+        getHandler(handlers, "listMessages")({ sessionId: session.id }, () => undefined)
+      ).resolves.toEqual([]);
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true });
+    }
+  });
+
+  it("uses saved provider settings instead of caller-supplied prompt settings", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "agentev4-provider-settings-"));
+    try {
+      const handlers = await loadHandlers();
+      const session = await createSession(handlers, workspacePath);
+      const savedBaseUrl = "http://127.0.0.1:11434/v1";
+      await getHandler(handlers, "saveProviderSettings")(
+        { provider: "ollama", model: "saved-model", baseUrl: savedBaseUrl },
+        () => undefined
+      );
+
+      await expect(
+        getHandler(handlers, "sendPrompt")(
+          {
+            sessionId: session.id,
+            prompt: "answer using the saved config",
+            provider: "openai",
+            model: "caller-model",
+            baseUrl: "https://caller.example/v1"
+          },
+          () => undefined
+        )
+      ).resolves.toMatchObject({ haltReason: "end_turn", turnsUsed: 1 });
+      expect(testState.providerConfigs).toEqual([
+        { provider: "ollama", model: "saved-model", baseUrl: savedBaseUrl, apiKey: undefined }
+      ]);
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true });
+    }
   });
 });
