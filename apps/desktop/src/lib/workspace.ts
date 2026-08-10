@@ -9,6 +9,17 @@ export interface ReadyWorkspace {
   tools: string[];
 }
 
+export type WorkspaceLifecycleAction =
+  | { type: "WORKSPACE_SELECTION_STARTED" }
+  | { type: "WORKSPACE_SELECTION_CANCELLED" }
+  | { type: "WORKSPACE_PREPARING" }
+  | { type: "WORKSPACE_READY"; ready: ReadyWorkspace }
+  | { type: "WORKSPACE_PREPARATION_FAILED"; error: string };
+
+export interface WorkspaceSelectionController {
+  select(): Promise<void> | undefined;
+}
+
 interface InitializedWorkspace {
   workspacePath: string;
   sessions: SessionConfig[];
@@ -57,5 +68,50 @@ export async function prepareWorkspace(input: {
     activeSessionId,
     messages,
     tools
+  };
+}
+
+export function createWorkspaceSelectionController(input: {
+  selectWorkspaceFolder: () => Promise<string | null>;
+  defaultMode: () => AgentMode;
+  defaultPermissionMode: () => PermissionMode;
+  prepare?: typeof prepareWorkspace;
+  dispatch: (action: WorkspaceLifecycleAction) => void;
+}): WorkspaceSelectionController {
+  let selectionInFlight = false;
+  const prepare = input.prepare ?? prepareWorkspace;
+
+  async function runSelection(): Promise<void> {
+    input.dispatch({ type: "WORKSPACE_SELECTION_STARTED" });
+    try {
+      const workspacePath = await input.selectWorkspaceFolder();
+      if (!workspacePath) {
+        input.dispatch({ type: "WORKSPACE_SELECTION_CANCELLED" });
+        return;
+      }
+
+      input.dispatch({ type: "WORKSPACE_PREPARING" });
+      const ready = await prepare({
+        workspacePath,
+        defaultMode: input.defaultMode(),
+        defaultPermissionMode: input.defaultPermissionMode()
+      });
+      input.dispatch({ type: "WORKSPACE_READY", ready });
+    } catch (error) {
+      input.dispatch({
+        type: "WORKSPACE_PREPARATION_FAILED",
+        error: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      selectionInFlight = false;
+    }
+  }
+
+  return {
+    select() {
+      if (selectionInFlight) return undefined;
+      selectionInFlight = true;
+      return runSelection();
+    }
   };
 }

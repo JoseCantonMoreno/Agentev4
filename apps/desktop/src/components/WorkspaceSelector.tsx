@@ -1,35 +1,32 @@
 import { FolderOpen } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { selectWorkspaceFolder } from "../lib/dialog";
-import { prepareWorkspace } from "../lib/workspace";
+import { createWorkspaceSelectionController } from "../lib/workspace";
 import { useAppState } from "../state/store";
 
 export function WorkspaceSelector() {
   const { state, dispatch } = useAppState();
   const [opening, setOpening] = useState(false);
+  const defaults = useRef({ mode: state.defaultMode, permissionMode: state.defaultPermissionMode });
+  defaults.current = { mode: state.defaultMode, permissionMode: state.defaultPermissionMode };
+  const controller = useRef<ReturnType<typeof createWorkspaceSelectionController> | null>(null);
+
+  if (!controller.current) {
+    controller.current = createWorkspaceSelectionController({
+      selectWorkspaceFolder,
+      defaultMode: () => defaults.current.mode,
+      defaultPermissionMode: () => defaults.current.permissionMode,
+      dispatch
+    });
+  }
 
   async function handleSelect() {
-    setOpening(true);
-    dispatch({ type: "WORKSPACE_SELECTION_STARTED" });
-    try {
-      const workspacePath = await selectWorkspaceFolder();
-      if (!workspacePath) {
-        dispatch({ type: "WORKSPACE_SELECTION_CANCELLED" });
-        return;
-      }
+    const selection = controller.current?.select();
+    if (!selection) return;
 
-      dispatch({ type: "WORKSPACE_PREPARING" });
-      const ready = await prepareWorkspace({
-        workspacePath,
-        defaultMode: state.defaultMode,
-        defaultPermissionMode: state.defaultPermissionMode
-      });
-      dispatch({ type: "WORKSPACE_READY", ready });
-    } catch (error) {
-      dispatch({
-        type: "WORKSPACE_PREPARATION_FAILED",
-        error: error instanceof Error ? error.message : String(error)
-      });
+    setOpening(true);
+    try {
+      await selection;
     } finally {
       setOpening(false);
     }
@@ -44,7 +41,11 @@ export function WorkspaceSelector() {
     >
       <FolderOpen size={16} />
       <span className="truncate">
-        {state.workspacePath ? state.workspacePath : opening ? "Abriendo workspace…" : "Seleccionar carpeta de workspace"}
+        {state.workspaceStatus === "preparing"
+          ? "Preparando workspace…"
+          : opening || state.workspaceStatus === "selecting"
+            ? "Seleccionando workspace…"
+            : state.workspacePath ?? "Seleccionar carpeta de workspace"}
       </span>
     </button>
   );

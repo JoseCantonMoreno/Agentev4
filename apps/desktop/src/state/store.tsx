@@ -11,7 +11,7 @@ import type {
   SessionConfig
 } from "@agentev4/shared";
 import { onServerEvent } from "../lib/ipc";
-import type { ReadyWorkspace } from "../lib/workspace";
+import type { WorkspaceLifecycleAction } from "../lib/workspace";
 
 export interface ProviderConfig {
   provider: LlmProviderName;
@@ -19,7 +19,7 @@ export interface ProviderConfig {
   baseUrl: string;
 }
 
-interface AppState {
+export interface AppState {
   workspacePath: string | null;
   workspaceStatus: "idle" | "selecting" | "preparing" | "ready";
   sessions: SessionConfig[];
@@ -39,12 +39,8 @@ interface AppState {
   defaultPermissionMode: PermissionMode;
 }
 
-type Action =
-  | { type: "WORKSPACE_SELECTION_STARTED" }
-  | { type: "WORKSPACE_SELECTION_CANCELLED" }
-  | { type: "WORKSPACE_PREPARING" }
-  | { type: "WORKSPACE_READY"; ready: ReadyWorkspace }
-  | { type: "WORKSPACE_PREPARATION_FAILED"; error: string }
+export type Action =
+  | WorkspaceLifecycleAction
   | { type: "SESSIONS_SET"; sessions: SessionConfig[] }
   | { type: "SESSION_ACTIVATED"; sessionId: string | null; messages: AgentMessage[] }
   | { type: "MESSAGES_SET"; messages: AgentMessage[] }
@@ -58,7 +54,7 @@ type Action =
   | { type: "TOOL_TOGGLED"; tool: string }
   | { type: "DEFAULTS_SET"; mode?: AgentMode; permissionMode?: PermissionMode };
 
-const initialState: AppState = {
+export const initialState: AppState = {
   workspacePath: null,
   workspaceStatus: "idle",
   sessions: [],
@@ -82,7 +78,7 @@ function hasReadyWorkspace(state: AppState): boolean {
   return state.workspacePath !== null && state.activeSessionId !== null;
 }
 
-function reducer(state: AppState, action: Action): AppState {
+export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "WORKSPACE_SELECTION_STARTED":
       return { ...state, workspaceStatus: "selecting", error: null };
