@@ -34,9 +34,23 @@ export const AgentContextUpdateEventSchema = z.object({
 });
 export type AgentContextUpdateEvent = z.infer<typeof AgentContextUpdateEventSchema>;
 
+/**
+ * Evento IPC adicional a los 3 mínimos del plan (Fase 11): dispara el modal
+ * HITL en la UI. `requestId` identifica la respuesta que el frontend debe
+ * devolver vía el método `respondPermission` del agent-server.
+ */
+export const AgentPermissionRequestEventSchema = z.object({
+  type: z.literal("agent:permission_request"),
+  sessionId: z.string(),
+  requestId: z.string(),
+  toolCall: ToolCallSchema
+});
+export type AgentPermissionRequestEvent = z.infer<typeof AgentPermissionRequestEventSchema>;
+
 export const AgentIpcEventSchema = z.discriminatedUnion("type", [
   AgentThoughtEventSchema,
   AgentToolCallEventSchema,
-  AgentContextUpdateEventSchema
+  AgentContextUpdateEventSchema,
+  AgentPermissionRequestEventSchema
 ]);
 export type AgentIpcEvent = z.infer<typeof AgentIpcEventSchema>;

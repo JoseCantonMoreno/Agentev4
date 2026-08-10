@@ -59,4 +59,14 @@ describe("packages/shared schemas", () => {
     });
     expect(event.type).toBe("agent:context_update");
   });
+
+  it("parses agent:permission_request (HITL, Fase 11)", () => {
+    const event = AgentIpcEventSchema.parse({
+      type: "agent:permission_request",
+      sessionId: "s1",
+      requestId: "req_1",
+      toolCall: { id: "call_1", name: "FileSystem_Write", input: { path: "a.txt" } }
+    });
+    expect(event.type).toBe("agent:permission_request");
+  });
 });

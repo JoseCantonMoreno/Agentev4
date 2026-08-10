@@ -53,6 +53,17 @@ describe("SessionManager", () => {
     expect(() => manager.renameSession("no-existe", "x")).toThrow(SessionNotFoundError);
   });
 
+  it("elimina una sesión junto con su historial de mensajes", () => {
+    const created = manager.createSession({ name: "A", workspacePath, mode: "agent", permissionMode: "default" });
+    manager.appendMessage(created.id, { role: "user", content: "hola" });
+
+    manager.deleteSession(created.id);
+
+    expect(manager.getSession(created.id)).toBeUndefined();
+    expect(manager.listSessions()).toEqual([]);
+    expect(() => manager.deleteSession(created.id)).toThrow(SessionNotFoundError);
+  });
+
   it("acumula historial de mensajes en orden y actualiza updatedAt", () => {
     const created = manager.createSession({ name: "A", workspacePath, mode: "agent", permissionMode: "default" });
 

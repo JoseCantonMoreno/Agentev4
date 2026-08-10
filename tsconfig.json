@@ -3,6 +3,8 @@
   "references": [
     { "path": "packages/shared" },
     { "path": "packages/core" },
-    { "path": "packages/tools" }
+    { "path": "packages/tools" },
+    { "path": "apps/desktop/server" },
+    { "path": "apps/desktop" }
   ]
 }

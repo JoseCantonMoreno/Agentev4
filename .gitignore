@@ -9,6 +9,10 @@ dist/
 .turbo/
 *.tsbuildinfo
 
+# Artefactos de build de Tauri/Rust (Fase 11)
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+
 # Logs y entornos locales
 *.log
 .env
@@ -16,3 +20,6 @@ dist/
 
 # Workspace runtime del agente (creado por la app, no versionado)
 .agente/
+
+# Configuración local de Claude Code (launch.json de preview, etc.)
+.claude/
