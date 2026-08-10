@@ -8,6 +8,7 @@
   },
   "packageManager": "pnpm@11.1.2",
   "scripts": {
+    "build": "tsc -b",
     "test": "vitest run --passWithNoTests",
     "lint": "eslint .",
     "format": "prettier --write ."
