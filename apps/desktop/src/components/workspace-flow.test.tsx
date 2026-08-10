@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatPanel } from "./ChatPanel";
 import { GlobalFeedback } from "./GlobalFeedback";
 import { WorkspaceSelector } from "./WorkspaceSelector";
-import { AppStateProvider, useAppState } from "../state/store";
+import { AppStateProvider, initialState, reducer, useAppState } from "../state/store";
 import type { ReadyWorkspace } from "../lib/workspace";
 
 const { selectWorkspaceFolder, prepareWorkspace } = vi.hoisted(() => ({
@@ -48,12 +48,13 @@ function readyWorkspaceFixture(): ReadyWorkspace {
   };
 }
 
-function StateSetup({ ready, status, withoutSession, error, notification }: {
+function StateSetup({ ready, status, withoutSession, error, notification, followUp }: {
   ready?: ReadyWorkspace;
   status?: "selecting" | "preparing";
   withoutSession?: boolean;
   error?: string;
   notification?: string;
+  followUp?: "cancelled" | "failed";
 }) {
   const { dispatch } = useAppState();
 
@@ -62,9 +63,32 @@ function StateSetup({ ready, status, withoutSession, error, notification }: {
     if (status === "preparing") dispatch({ type: "WORKSPACE_PREPARING" });
     if (ready) dispatch({ type: "WORKSPACE_READY", ready });
     if (withoutSession) dispatch({ type: "SESSION_ACTIVATED", sessionId: null, messages: [] });
+    if (followUp === "cancelled") {
+      dispatch({ type: "WORKSPACE_SELECTION_STARTED" });
+      dispatch({ type: "WORKSPACE_SELECTION_CANCELLED" });
+    }
+    if (followUp === "failed") {
+      dispatch({ type: "WORKSPACE_PREPARING" });
+      dispatch({ type: "WORKSPACE_PREPARATION_FAILED", error: "No se pudo iniciar el sidecar" });
+    }
     if (error) dispatch({ type: "ERROR_SET", error });
     if (notification) dispatch({ type: "NOTIFICATION_SET", notification: { id: "saved", kind: "success", message: notification } });
-  }, [dispatch, error, notification, ready, status, withoutSession]);
+  }, [dispatch, error, followUp, notification, ready, status, withoutSession]);
+
+  return null;
+}
+
+function TimedNotificationReplacement() {
+  const { dispatch } = useAppState();
+
+  useEffect(() => {
+    dispatch({ type: "NOTIFICATION_SET", notification: { id: "first", kind: "success", message: "Primera notificación" } });
+    const replacement = window.setTimeout(
+      () => dispatch({ type: "NOTIFICATION_SET", notification: { id: "second", kind: "success", message: "Notificación de reemplazo" } }),
+      2_999
+    );
+    return () => window.clearTimeout(replacement);
+  }, [dispatch]);
 
   return null;
 }
@@ -134,6 +158,17 @@ describe("workspace-to-chat flow", () => {
     expect(screen.getByText("Selecciona o crea una sesión para empezar.")).not.toBeNull();
   });
 
+  it.each(["cancelled", "failed"] as const)("keeps the session prompt after workspace preparation is %s", (followUp) => {
+    render(
+      <AppStateProvider>
+        <StateSetup ready={readyWorkspaceFixture()} withoutSession followUp={followUp} />
+        <ChatPanel />
+      </AppStateProvider>
+    );
+
+    expect(screen.getByText("Selecciona o crea una sesión para empezar.")).not.toBeNull();
+  });
+
   it("shows initialization errors even when no session exists", async () => {
     selectWorkspaceFolder.mockResolvedValue("C:\\broken");
     prepareWorkspace.mockRejectedValue(new Error("No se pudo iniciar el sidecar"));
@@ -166,8 +201,26 @@ describe("workspace-to-chat flow", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("keeps errors visible until the user closes them", async () => {
-    const user = userEvent.setup();
+  it("keeps a replacement notification visible when the first timeout reaches three seconds", () => {
+    vi.useFakeTimers();
+    render(
+      <AppStateProvider>
+        <TimedNotificationReplacement />
+        <GlobalFeedback />
+      </AppStateProvider>
+    );
+
+    expect(screen.getByRole("status").textContent).toContain("Primera notificación");
+    act(() => vi.advanceTimersByTime(2_999));
+    expect(screen.getByRole("status").textContent).toContain("Notificación de reemplazo");
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByRole("status").textContent).toContain("Notificación de reemplazo");
+    act(() => vi.advanceTimersByTime(2_999));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("keeps errors visible for three seconds and until the user closes them", () => {
+    vi.useFakeTimers();
     render(
       <AppStateProvider>
         <StateSetup error="No se pudo iniciar el sidecar" />
@@ -175,8 +228,67 @@ describe("workspace-to-chat flow", () => {
       </AppStateProvider>
     );
 
-    expect(await screen.findByRole("alert")).not.toBeNull();
-    await user.click(screen.getByRole("button", { name: "Cerrar error" }));
+    expect(screen.getByRole("alert")).not.toBeNull();
+    act(() => vi.advanceTimersByTime(3_000));
+    expect(screen.getByRole("alert")).not.toBeNull();
+    act(() => screen.getByRole("button", { name: "Cerrar error" }).click());
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("uses neutral and emerald feedback styling for errors", async () => {
+    render(
+      <AppStateProvider>
+        <StateSetup error="No se pudo iniciar el sidecar" />
+        <GlobalFeedback />
+      </AppStateProvider>
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.className).toContain("bg-neutral-900");
+    expect(alert.querySelector(".text-emerald-400")).not.toBeNull();
+  });
+});
+
+describe("workspace and notification state", () => {
+  it.each(["WORKSPACE_SELECTION_CANCELLED", "WORKSPACE_PREPARATION_FAILED"] as const)(
+    "keeps a sessionless workspace ready after %s",
+    (type) => {
+      const sessionlessWorkspace = reducer(
+        reducer(initialState, { type: "WORKSPACE_READY", ready: readyWorkspaceFixture() }),
+        { type: "SESSION_ACTIVATED", sessionId: null, messages: [] }
+      );
+      const pending = reducer(
+        sessionlessWorkspace,
+        { type: type === "WORKSPACE_SELECTION_CANCELLED" ? "WORKSPACE_SELECTION_STARTED" : "WORKSPACE_PREPARING" }
+      );
+      const resolved = reducer(
+        pending,
+        type === "WORKSPACE_SELECTION_CANCELLED"
+          ? { type }
+          : { type, error: "No se pudo iniciar el sidecar" }
+      );
+
+      expect(resolved.workspaceStatus).toBe("ready");
+      expect(resolved.workspacePath).toBe("C:\\repo");
+      expect(resolved.activeSessionId).toBeNull();
+    }
+  );
+
+  it("does not clear a replacement notification when an earlier timeout completes", () => {
+    const first = reducer(initialState, {
+      type: "NOTIFICATION_SET",
+      notification: { id: "first", kind: "success", message: "Primera notificación" }
+    });
+    const replacement = reducer(first, {
+      type: "NOTIFICATION_SET",
+      notification: { id: "second", kind: "success", message: "Notificación de reemplazo" }
+    });
+    const afterFirstTimeout = reducer(replacement, { type: "NOTIFICATION_CLEAR", id: "first" });
+
+    expect(afterFirstTimeout.notification).toEqual({
+      id: "second",
+      kind: "success",
+      message: "Notificación de reemplazo"
+    });
   });
 });

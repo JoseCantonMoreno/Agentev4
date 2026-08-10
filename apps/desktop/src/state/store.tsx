@@ -56,7 +56,7 @@ export type Action =
   | { type: "ERROR_SET"; error: string | null }
   | { type: "ERROR_CLEAR" }
   | { type: "NOTIFICATION_SET"; notification: AppNotification }
-  | { type: "NOTIFICATION_CLEAR" }
+  | { type: "NOTIFICATION_CLEAR"; id: string }
   | { type: "SERVER_EVENT"; event: AgentIpcEvent }
   | { type: "PERMISSION_RESOLVED" }
   | { type: "PROVIDER_CONFIG_SET"; config: Partial<ProviderConfig> }
@@ -85,8 +85,8 @@ export const initialState: AppState = {
   defaultPermissionMode: "default"
 };
 
-function hasReadyWorkspace(state: AppState): boolean {
-  return state.workspacePath !== null && state.activeSessionId !== null;
+function hasLoadedWorkspace(state: AppState): boolean {
+  return state.workspacePath !== null;
 }
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -96,7 +96,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "WORKSPACE_SELECTION_CANCELLED":
       return {
         ...state,
-        workspaceStatus: hasReadyWorkspace(state) ? "ready" : "idle"
+        workspaceStatus: hasLoadedWorkspace(state) ? "ready" : "idle"
       };
     case "WORKSPACE_PREPARING":
       return { ...state, workspaceStatus: "preparing", error: null };
@@ -118,7 +118,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "WORKSPACE_PREPARATION_FAILED":
       return {
         ...state,
-        workspaceStatus: hasReadyWorkspace(state) ? "ready" : "idle",
+        workspaceStatus: hasLoadedWorkspace(state) ? "ready" : "idle",
         error: action.error
       };
     case "SESSIONS_SET":
@@ -145,7 +145,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "NOTIFICATION_SET":
       return { ...state, notification: action.notification };
     case "NOTIFICATION_CLEAR":
-      return { ...state, notification: null };
+      return state.notification?.id === action.id ? { ...state, notification: null } : state;
     case "PERMISSION_RESOLVED":
       return { ...state, pendingPermission: null };
     case "PROVIDER_CONFIG_SET":
