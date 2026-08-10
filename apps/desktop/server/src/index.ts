@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import type {
   AgentIpcEvent,
   AgentInterface,
@@ -13,7 +11,6 @@ import type {
 } from "@agentev4/shared";
 import {
   KeyStore,
-  type DatabaseHandle,
   type CanUseTool,
   type PermissionDecision,
   PermissionEngine,
@@ -27,6 +24,7 @@ import {
 import { createStaticToolRegistry, executeRegisteredTool } from "@agentev4/tools";
 import { saveProviderSettings } from "./provider-settings.js";
 import { encodeLine, isRpcRequest, parseLines, type RpcRequest } from "./protocol.js";
+import { switchWorkspace, type WorkspaceState } from "./workspace.js";
 
 const SYSTEM_PROMPT = "You are Agentev4, an autonomous coding agent.";
 // ponytail: sin tabla de límites por modelo todavía; sube a un lookup real
@@ -34,10 +32,7 @@ const SYSTEM_PROMPT = "You are Agentev4, an autonomous coding agent.";
 const MAX_CONTEXT_TOKENS = 200_000;
 const DEFAULT_GOVERNANCE = { maxTurns: 8, maxBudgetUsd: 1, effortLevel: "medium" as const };
 
-interface ServerState {
-  workspacePath?: string;
-  dbHandle?: DatabaseHandle;
-  sessionManager?: SessionManager;
+interface ServerState extends WorkspaceState {
   providerSettings?: SavedProviderSettings["config"];
   readonly keyStore: KeyStore;
   readonly pendingPermissions: Map<string, (decision: PermissionDecision) => void>;
@@ -57,16 +52,8 @@ function requireWorkspacePath(): string {
   return state.workspacePath;
 }
 
-async function initWorkspace(params: { workspacePath: string }) {
-  await mkdir(join(params.workspacePath, ".agente"), { recursive: true });
-  state.dbHandle?.close();
-
-  const handle = openDatabase(join(params.workspacePath, ".agente", "sessions.db"));
-  state.workspacePath = params.workspacePath;
-  state.dbHandle = handle;
-  state.sessionManager = new SessionManager(handle.db);
-
-  return { workspacePath: params.workspacePath, sessions: state.sessionManager.listSessions() };
+async function initWorkspace(params: { workspacePath: unknown }) {
+  return switchWorkspace(state, params.workspacePath);
 }
 
 /** Envuelve el `AgentInterface` resiliente para emitir `agent:thought` en cada turno LLM. */
