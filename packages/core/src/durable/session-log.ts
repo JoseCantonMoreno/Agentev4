@@ -3,9 +3,16 @@ import { dirname } from "node:path";
 import type { DurableLogEntry } from "@agentev4/shared";
 import { DurableLogEntrySchema } from "@agentev4/shared";
 
+/**
+ * Escribe una entrada del log durable. Pasa siempre por `DurableLogEntrySchema.parse`
+ * antes de serializar (Fase 10, DoD de seguridad de claves): Zod descarta
+ * cualquier campo fuera del esquema, así que un campo ajeno adjuntado por
+ * error (p.ej. una `apiKey`) nunca llega a tocar disco.
+ */
 export async function appendLogEntry(logPath: string, entry: DurableLogEntry): Promise<void> {
   await mkdir(dirname(logPath), { recursive: true });
-  await appendFile(logPath, `${JSON.stringify(entry)}\n`, "utf8");
+  const sanitized = DurableLogEntrySchema.parse(entry);
+  await appendFile(logPath, `${JSON.stringify(sanitized)}\n`, "utf8");
 }
 
 /** Replay exacto del JSONL: cada línea es una entrada, en el orden en que se escribió. */

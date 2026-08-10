@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DurableLogEntry } from "@agentev4/shared";
@@ -47,6 +47,22 @@ describe("session-log", () => {
     const entries = await replayLog(logPath);
     const checkpoint = latestCheckpoint(entries);
     expect(checkpoint?.checkpoint.turnsUsed).toBe(3);
+  });
+
+  it("Fase 10 DoD: un campo ajeno (ej. apiKey) adjuntado a una entrada nunca llega al JSONL en disco", async () => {
+    const contaminated = {
+      type: "hitl_pause",
+      reason: "esperando confirmación",
+      apiKey: "sk-ant-esto-no-deberia-persistirse"
+    } as unknown as DurableLogEntry;
+
+    await appendLogEntry(logPath, contaminated);
+
+    const raw = await readFile(logPath, "utf8");
+    expect(raw).not.toContain("sk-ant-esto-no-deberia-persistirse");
+
+    const [replayed] = await replayLog(logPath);
+    expect(replayed).toEqual({ type: "hitl_pause", reason: "esperando confirmación" });
   });
 
   it("latestCheckpoint devuelve undefined si no hay ningún checkpoint", async () => {
