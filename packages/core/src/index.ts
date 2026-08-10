@@ -6,3 +6,5 @@ export * from "./db/client.js";
 export * from "./db/session-manager.js";
 export * from "./db/memory.js";
 export * as dbSchema from "./db/schema.js";
+export * from "./context/token-counter.js";
+export * from "./context/compaction.js";

@@ -27,3 +27,13 @@ export const LoopGovernanceSchema = z.object({
   effortLevel: EffortLevelSchema
 });
 export type LoopGovernance = z.infer<typeof LoopGovernanceSchema>;
+
+export const CompactBoundarySchema = z.object({
+  id: z.string(),
+  summarizedCount: z.number().int().nonnegative(),
+  preservedGoals: z.array(z.string()),
+  preservedFiles: z.array(z.string()),
+  preservedDecisions: z.array(z.string()),
+  createdAt: z.coerce.date()
+});
+export type CompactBoundary = z.infer<typeof CompactBoundarySchema>;
