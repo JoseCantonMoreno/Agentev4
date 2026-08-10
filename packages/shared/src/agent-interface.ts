@@ -11,6 +11,8 @@ export interface AgentRunResult {
   message: AgentMessage;
   toolCalls: ToolCall[];
   stopReason: StopReason;
+  /** Coste estimado de este turno en USD; 0 si el adaptador no lo calcula todavía. */
+  costUsd: number;
 }
 
 /**
