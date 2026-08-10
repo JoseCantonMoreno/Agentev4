@@ -4,6 +4,12 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@agentev4/shared": "workspace:*"
+    "@agentev4/shared": "workspace:*",
+    "@ai-sdk/anthropic": "^4.0.36",
+    "@ai-sdk/google": "^4.0.39",
+    "@ai-sdk/openai-compatible": "^3.0.28",
+    "@mastra/core": "^1.57.0",
+    "ai": "^7.0.58",
+    "zod": "^3.25.76"
   }
 }
