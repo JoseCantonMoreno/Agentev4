@@ -9,6 +9,9 @@ dist/
 .turbo/
 *.tsbuildinfo
 
+# Reporte de cobertura (Fase 12, regenerable con `pnpm test:coverage`)
+coverage/
+
 # Artefactos de build de Tauri/Rust (Fase 11)
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
