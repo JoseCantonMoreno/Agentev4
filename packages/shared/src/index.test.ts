@@ -46,6 +46,8 @@ describe("packages/shared schemas", () => {
       updatedAt: now
     });
     expect(session.mode).toBe("agent");
+    expect(session.status).toBe("active");
+    expect(session.tokensUsed).toBe(0);
   });
 
   it("discriminates AgentIpcEvent by type", () => {

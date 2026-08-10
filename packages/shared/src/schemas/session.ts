@@ -11,12 +11,18 @@ export const PermissionModeSchema = z.enum([
 ]);
 export type PermissionMode = z.infer<typeof PermissionModeSchema>;
 
+export const SessionStatusSchema = z.enum(["active", "paused"]);
+export type SessionStatus = z.infer<typeof SessionStatusSchema>;
+
 export const SessionConfigSchema = z.object({
   id: z.string(),
   name: z.string(),
   workspacePath: z.string(),
   mode: AgentModeSchema,
   permissionMode: PermissionModeSchema,
+  status: SessionStatusSchema.default("active"),
+  parentSessionId: z.string().optional(),
+  tokensUsed: z.number().int().nonnegative().default(0),
   createdAt: z.coerce.date(),
   updatedAt: z.coerce.date()
 });
