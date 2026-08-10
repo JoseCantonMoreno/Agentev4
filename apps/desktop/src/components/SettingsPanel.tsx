@@ -21,9 +21,12 @@ export function SettingsPanel() {
   const [hasKey, setHasKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const hasKeyRequest = useRef(0);
+  const savingRef = useRef(false);
 
   useEffect(() => {
     if (!state.settingsOpen) return;
+    hasKeyRequest.current += 1;
+    setHasKey(false);
     setDraft({ ...state.providerConfig, apiKey: "" });
   }, [state.settingsOpen]);
 
@@ -42,12 +45,14 @@ export function SettingsPanel() {
   if (!state.settingsOpen) return null;
 
   async function handleSave() {
+    if (savingRef.current) return;
     const model = draft.model.trim();
     if (!model) {
       dispatch({ type: "ERROR_SET", error: "El modelo es obligatorio." });
       return;
     }
 
+    savingRef.current = true;
     setSaving(true);
     dispatch({ type: "ERROR_SET", error: null });
     try {
@@ -57,12 +62,13 @@ export function SettingsPanel() {
         baseUrl: draft.baseUrl.trim(),
         ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {})
       });
+      const committedConfig = { ...result.config, baseUrl: result.config.baseUrl ?? "" };
       dispatch({
         type: "PROVIDER_CONFIG_COMMITTED",
-        config: { ...result.config, baseUrl: result.config.baseUrl ?? "" }
+        config: committedConfig
       });
       hasKeyRequest.current += 1;
-      setDraft((current) => ({ ...current, apiKey: "" }));
+      setDraft({ ...committedConfig, apiKey: "" });
       setHasKey(result.hasApiKey);
       dispatch({
         type: "NOTIFICATION_SET",
@@ -75,8 +81,15 @@ export function SettingsPanel() {
     } catch (error) {
       dispatch({ type: "ERROR_SET", error: error instanceof Error ? error.message : String(error) });
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
+  }
+
+  function handleProviderChange(provider: LlmProviderName) {
+    hasKeyRequest.current += 1;
+    setHasKey(false);
+    setDraft((current) => ({ ...current, provider }));
   }
 
   return (
@@ -95,7 +108,7 @@ export function SettingsPanel() {
           <select
             id="provider"
             value={draft.provider}
-            onChange={(event) => setDraft((current) => ({ ...current, provider: event.target.value as LlmProviderName }))}
+            onChange={(event) => handleProviderChange(event.target.value as LlmProviderName)}
             disabled={saving}
             className="rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
           >
