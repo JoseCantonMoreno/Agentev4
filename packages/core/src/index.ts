@@ -8,3 +8,7 @@ export * from "./db/memory.js";
 export * as dbSchema from "./db/schema.js";
 export * from "./context/token-counter.js";
 export * from "./context/compaction.js";
+export * from "./durable/session-log.js";
+export * from "./durable/done-condition.js";
+export * from "./durable/evaluator.js";
+export * from "./durable/long-running-harness.js";
