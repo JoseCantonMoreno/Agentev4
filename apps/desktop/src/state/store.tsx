@@ -11,6 +11,7 @@ import type {
   SessionConfig
 } from "@agentev4/shared";
 import { onServerEvent } from "../lib/ipc";
+import type { ReadyWorkspace } from "../lib/workspace";
 
 export interface ProviderConfig {
   provider: LlmProviderName;
@@ -20,6 +21,7 @@ export interface ProviderConfig {
 
 interface AppState {
   workspacePath: string | null;
+  workspaceStatus: "idle" | "selecting" | "preparing" | "ready";
   sessions: SessionConfig[];
   activeSessionId: string | null;
   messages: AgentMessage[];
@@ -38,7 +40,11 @@ interface AppState {
 }
 
 type Action =
-  | { type: "WORKSPACE_LOADED"; workspacePath: string; sessions: SessionConfig[] }
+  | { type: "WORKSPACE_SELECTION_STARTED" }
+  | { type: "WORKSPACE_SELECTION_CANCELLED" }
+  | { type: "WORKSPACE_PREPARING" }
+  | { type: "WORKSPACE_READY"; ready: ReadyWorkspace }
+  | { type: "WORKSPACE_PREPARATION_FAILED"; error: string }
   | { type: "SESSIONS_SET"; sessions: SessionConfig[] }
   | { type: "SESSION_ACTIVATED"; sessionId: string | null; messages: AgentMessage[] }
   | { type: "MESSAGES_SET"; messages: AgentMessage[] }
@@ -54,6 +60,7 @@ type Action =
 
 const initialState: AppState = {
   workspacePath: null,
+  workspaceStatus: "idle",
   sessions: [],
   activeSessionId: null,
   messages: [],
@@ -71,18 +78,41 @@ const initialState: AppState = {
   defaultPermissionMode: "default"
 };
 
+function hasReadyWorkspace(state: AppState): boolean {
+  return state.workspacePath !== null && state.activeSessionId !== null;
+}
+
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
-    case "WORKSPACE_LOADED":
+    case "WORKSPACE_SELECTION_STARTED":
+      return { ...state, workspaceStatus: "selecting", error: null };
+    case "WORKSPACE_SELECTION_CANCELLED":
       return {
         ...state,
-        workspacePath: action.workspacePath,
-        sessions: action.sessions,
-        activeSessionId: null,
-        messages: [],
+        workspaceStatus: hasReadyWorkspace(state) ? "ready" : "idle"
+      };
+    case "WORKSPACE_PREPARING":
+      return { ...state, workspaceStatus: "preparing", error: null };
+    case "WORKSPACE_READY":
+      return {
+        ...state,
+        workspacePath: action.ready.workspacePath,
+        workspaceStatus: "ready",
+        sessions: action.ready.sessions,
+        activeSessionId: action.ready.activeSessionId,
+        messages: action.ready.messages,
+        availableTools: action.ready.tools,
         thoughts: [],
         toolCalls: [],
-        context: null
+        context: null,
+        pendingPermission: null,
+        error: null
+      };
+    case "WORKSPACE_PREPARATION_FAILED":
+      return {
+        ...state,
+        workspaceStatus: hasReadyWorkspace(state) ? "ready" : "idle",
+        error: action.error
       };
     case "SESSIONS_SET":
       return { ...state, sessions: action.sessions };

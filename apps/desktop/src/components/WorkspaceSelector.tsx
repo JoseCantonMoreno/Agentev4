@@ -1,9 +1,8 @@
 import { FolderOpen } from "lucide-react";
 import { useState } from "react";
 import { selectWorkspaceFolder } from "../lib/dialog";
-import { callServer } from "../lib/ipc";
+import { prepareWorkspace } from "../lib/workspace";
 import { useAppState } from "../state/store";
-import type { SessionConfig } from "@agentev4/shared";
 
 export function WorkspaceSelector() {
   const { state, dispatch } = useAppState();
@@ -11,19 +10,26 @@ export function WorkspaceSelector() {
 
   async function handleSelect() {
     setOpening(true);
-    dispatch({ type: "ERROR_SET", error: null });
+    dispatch({ type: "WORKSPACE_SELECTION_STARTED" });
     try {
       const workspacePath = await selectWorkspaceFolder();
-      if (!workspacePath) return;
+      if (!workspacePath) {
+        dispatch({ type: "WORKSPACE_SELECTION_CANCELLED" });
+        return;
+      }
 
-      const result = await callServer<{ workspacePath: string; sessions: SessionConfig[] }>("initWorkspace", {
-        workspacePath
+      dispatch({ type: "WORKSPACE_PREPARING" });
+      const ready = await prepareWorkspace({
+        workspacePath,
+        defaultMode: state.defaultMode,
+        defaultPermissionMode: state.defaultPermissionMode
       });
-      dispatch({ type: "WORKSPACE_LOADED", workspacePath: result.workspacePath, sessions: result.sessions });
-      const tools = await callServer<string[]>("listTools");
-      dispatch({ type: "TOOLS_SET", tools });
+      dispatch({ type: "WORKSPACE_READY", ready });
     } catch (error) {
-      dispatch({ type: "ERROR_SET", error: error instanceof Error ? error.message : String(error) });
+      dispatch({
+        type: "WORKSPACE_PREPARATION_FAILED",
+        error: error instanceof Error ? error.message : String(error)
+      });
     } finally {
       setOpening(false);
     }
