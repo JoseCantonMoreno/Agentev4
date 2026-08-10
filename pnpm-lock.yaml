@@ -50,6 +50,9 @@ importers:
       '@agentev4/shared':
         specifier: workspace:*
         version: link:../shared
+      '@agentev4/tools':
+        specifier: workspace:*
+        version: link:../tools
       '@ai-sdk/anthropic':
         specifier: ^4.0.36
         version: 4.0.36(zod@3.25.76)
@@ -80,6 +83,12 @@ importers:
       '@agentev4/shared':
         specifier: workspace:*
         version: link:../shared
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.30.0
+        version: 1.30.0(zod@3.25.76)
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
 
 packages:
 
