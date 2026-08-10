@@ -128,6 +128,16 @@ export class SessionManager {
     return rowToSessionConfig(row);
   }
 
+  /** Elimina la sesión y su historial/tool-executions asociados (Fase 11, panel de sesiones). */
+  deleteSession(sessionId: string): void {
+    this.requireSessionRow(sessionId);
+    this.db.transaction((tx) => {
+      tx.delete(toolExecutions).where(eq(toolExecutions.sessionId, sessionId)).run();
+      tx.delete(messages).where(eq(messages.sessionId, sessionId)).run();
+      tx.delete(sessions).where(eq(sessions.id, sessionId)).run();
+    });
+  }
+
   listMessages(sessionId: string): AgentMessage[] {
     return this.db
       .select()
