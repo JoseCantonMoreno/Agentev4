@@ -18,7 +18,6 @@ import {
   countContextTokens,
   createMastraAgentFactory,
   createResilientAgent,
-  openDatabase,
   runAgenticLoop
 } from "@agentev4/core";
 import { createStaticToolRegistry, executeRegisteredTool } from "@agentev4/tools";
