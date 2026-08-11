@@ -9,9 +9,21 @@ import { AppStateProvider, useAppState } from "../state/store";
 import { GlobalFeedback } from "./GlobalFeedback";
 import { SettingsPanel } from "./SettingsPanel";
 
+const serverLifecycle = vi.hoisted(() => ({
+  listener: undefined as ((event: { type: "process:stopped"; message: string }) => void) | undefined
+}));
+
 vi.mock("../lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/ipc")>()),
-  callServer: vi.fn()
+  callServer: vi.fn(),
+  onServerLifecycle: vi.fn(
+    (listener: (event: { type: "process:stopped"; message: string }) => void) => {
+      serverLifecycle.listener = listener;
+      return () => {
+        if (serverLifecycle.listener === listener) serverLifecycle.listener = undefined;
+      };
+    }
+  )
 }));
 
 function OpenSettings(): React.ReactElement {
@@ -51,9 +63,107 @@ function SettingsHarness(): React.ReactElement {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  serverLifecycle.listener = undefined;
 });
 
 describe("provider settings save flow", () => {
+  it("resets an open panel on crash, ignores stale key state, and retries with the local key", async () => {
+    const pendingHasKey: Array<{
+      provider: string;
+      resolve: (value: { hasKey: boolean }) => void;
+    }> = [];
+    let initialAnthropicRead = true;
+    let saveCount = 0;
+    vi.mocked(callServer).mockImplementation((method, params) => {
+      if (method === "hasApiKey") {
+        const provider = params?.provider as string;
+        if (provider === "anthropic" && initialAnthropicRead) {
+          initialAnthropicRead = false;
+          return Promise.resolve({ hasKey: false });
+        }
+        return new Promise<{ hasKey: boolean }>((resolve) => {
+          pendingHasKey.push({ provider, resolve });
+        });
+      }
+      if (method === "saveProviderSettings" && saveCount++ === 0) {
+        return Promise.resolve({
+          config: { provider: "openai", model: "gpt-5" },
+          hasApiKey: true
+        });
+      }
+      if (method === "saveProviderSettings") {
+        return Promise.resolve({
+          config: { provider: "openai", model: "gpt-5" },
+          hasApiKey: true
+        });
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    const user = userEvent.setup();
+    const retrySecret = "sk-local-retry-after-crash";
+
+    render(<SettingsHarness />);
+    await user.selectOptions(screen.getByLabelText("Proveedor"), "openai");
+    await user.clear(screen.getByLabelText("Modelo"));
+    await user.type(screen.getByLabelText("Modelo"), "gpt-5");
+    await user.type(screen.getByLabelText("API key"), "sk-first-process");
+    await user.click(screen.getByRole("button", { name: "Guardar configuraci\u00f3n" }));
+    await waitFor(() => {
+      expect((screen.getByLabelText("API key") as HTMLInputElement).placeholder).toContain(
+        "Clave configurada"
+      );
+    });
+    await user.type(screen.getByLabelText("API key"), retrySecret);
+
+    act(() => {
+      serverLifecycle.listener?.({
+        type: "process:stopped",
+        message: "El servidor del agente se cerr\u00f3"
+      });
+    });
+
+    await waitFor(() => {
+      expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe("anthropic");
+      expect((screen.getByLabelText("Modelo") as HTMLInputElement).value).toBe("claude-sonnet-5");
+      expect((screen.getByLabelText("API key") as HTMLInputElement).placeholder).toBe("API key");
+      expect((screen.getByLabelText("API key") as HTMLInputElement).value).toBe("");
+    });
+    expect(screen.getByTestId("state-json").textContent).toContain('"serverEpoch":1');
+    expect(screen.getByTestId("state-json").textContent).not.toContain(retrySecret);
+    expect(document.body.innerHTML).not.toContain(retrySecret);
+
+    await waitFor(() =>
+      expect(pendingHasKey.some(({ provider }) => provider === "anthropic")).toBe(true)
+    );
+    act(() => {
+      for (const request of pendingHasKey) {
+        request.resolve({ hasKey: request.provider === "openai" });
+      }
+    });
+    await waitFor(() => {
+      expect((screen.getByLabelText("API key") as HTMLInputElement).placeholder).toBe("API key");
+    });
+
+    await user.selectOptions(screen.getByLabelText("Proveedor"), "openai");
+    await user.clear(screen.getByLabelText("Modelo"));
+    await user.type(screen.getByLabelText("Modelo"), "gpt-5");
+    await user.click(screen.getByRole("button", { name: "Guardar configuraci\u00f3n" }));
+    expect(
+      vi.mocked(callServer).mock.calls.filter(([method]) => method === "saveProviderSettings")[1]
+    ).toEqual([
+      "saveProviderSettings",
+      {
+        provider: "openai",
+        model: "gpt-5",
+        baseUrl: "",
+        apiKey: retrySecret
+      }
+    ]);
+    await waitFor(() =>
+      expect((screen.getByLabelText("API key") as HTMLInputElement).value).toBe("")
+    );
+  });
+
   it("commits provider settings and shows success only after the server confirms", async () => {
     let confirmSave: (settings: {
       config: { provider: "openai"; model: string };

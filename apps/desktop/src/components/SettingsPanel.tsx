@@ -41,13 +41,21 @@ export function SettingsPanel() {
   const [saving, setSaving] = useState(false);
   const hasKeyRequest = useRef(0);
   const savingRef = useRef(false);
+  const observedServerEpoch = useRef(state.serverEpoch);
+  const apiKeyDraftRef = useRef("");
 
   useEffect(() => {
-    if (!state.settingsOpen) return;
+    if (!state.settingsOpen) {
+      observedServerEpoch.current = state.serverEpoch;
+      return;
+    }
+    const serverChanged = observedServerEpoch.current !== state.serverEpoch;
+    observedServerEpoch.current = state.serverEpoch;
+    if (!serverChanged) apiKeyDraftRef.current = "";
     hasKeyRequest.current += 1;
     setHasKey(false);
     setDraft({ ...state.providerConfig, apiKey: "" });
-  }, [state.settingsOpen]);
+  }, [state.serverEpoch, state.settingsOpen]);
 
   useEffect(() => {
     if (!state.settingsOpen) return;
@@ -59,7 +67,7 @@ export function SettingsPanel() {
       .catch(() => {
         if (requestId === hasKeyRequest.current) setHasKey(false);
       });
-  }, [draft.provider, state.settingsOpen]);
+  }, [draft.provider, state.serverEpoch, state.settingsOpen]);
 
   if (!state.settingsOpen) return null;
 
@@ -71,6 +79,7 @@ export function SettingsPanel() {
       return;
     }
 
+    const apiKey = apiKeyDraftRef.current.trim();
     savingRef.current = true;
     setSaving(true);
     dispatch({ type: "ERROR_SET", error: null });
@@ -79,7 +88,7 @@ export function SettingsPanel() {
         provider: draft.provider,
         model,
         baseUrl: draft.baseUrl.trim(),
-        ...(draft.apiKey.trim() ? { apiKey: draft.apiKey.trim() } : {})
+        ...(apiKey ? { apiKey } : {})
       });
       const committedConfig = { ...result.config, baseUrl: result.config.baseUrl ?? "" };
       dispatch({
@@ -87,6 +96,7 @@ export function SettingsPanel() {
         config: committedConfig
       });
       hasKeyRequest.current += 1;
+      apiKeyDraftRef.current = "";
       setDraft({ ...committedConfig, apiKey: "" });
       setHasKey(result.hasApiKey);
       dispatch({
@@ -179,9 +189,10 @@ export function SettingsPanel() {
               id="api-key"
               type="password"
               value={draft.apiKey}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, apiKey: event.target.value }))
-              }
+              onChange={(event) => {
+                apiKeyDraftRef.current = event.target.value;
+                setDraft((current) => ({ ...current, apiKey: event.target.value }));
+              }}
               disabled={saving}
               placeholder={hasKey ? "Clave configurada (RAM) — sobrescribir" : "API key"}
               className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"

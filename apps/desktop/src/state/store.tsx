@@ -38,6 +38,7 @@ export interface AppState {
   settingsOpen: boolean;
   sending: boolean;
   activeRunId: string | null;
+  serverEpoch: number;
   error: string | null;
   notification: AppNotification | null;
   providerConfig: ProviderConfig;
@@ -80,6 +81,7 @@ export const initialState: AppState = {
   settingsOpen: false,
   sending: false,
   activeRunId: null,
+  serverEpoch: 0,
   error: null,
   notification: null,
   providerConfig: { provider: "anthropic", model: "claude-sonnet-5", baseUrl: "" },
@@ -164,6 +166,7 @@ export function reducer(state: AppState, action: Action): AppState {
         pendingPermission: null,
         sending: false,
         activeRunId: null,
+        serverEpoch: state.serverEpoch + 1,
         providerConfig: initialState.providerConfig,
         availableTools: [],
         disabledTools: new Set(),
