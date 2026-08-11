@@ -4,6 +4,7 @@ import {
   ToolCallSchema,
   ToolResultSchema,
   LlmProviderConfigSchema,
+  InitWorkspaceInputSchema,
   SessionConfigSchema,
   AgentIpcEventSchema
 } from "./index.js";
@@ -48,6 +49,34 @@ describe("packages/shared schemas", () => {
     expect(session.mode).toBe("agent");
     expect(session.status).toBe("active");
     expect(session.tokensUsed).toBe(0);
+  });
+
+  it("rejects invalid workspace initialization modes at the shared boundary", () => {
+    expect(
+      InitWorkspaceInputSchema.parse({
+        workspacePath: "C:\\repo",
+        defaultMode: "agent",
+        defaultPermissionMode: "default"
+      })
+    ).toEqual({
+      workspacePath: "C:\\repo",
+      defaultMode: "agent",
+      defaultPermissionMode: "default"
+    });
+    expect(() =>
+      InitWorkspaceInputSchema.parse({
+        workspacePath: "C:\\repo",
+        defaultMode: "unattended",
+        defaultPermissionMode: "default"
+      })
+    ).toThrow();
+    expect(() =>
+      InitWorkspaceInputSchema.parse({
+        workspacePath: "C:\\repo",
+        defaultMode: "agent",
+        defaultPermissionMode: "unrestricted"
+      })
+    ).toThrow();
   });
 
   it("discriminates AgentIpcEvent by type", () => {

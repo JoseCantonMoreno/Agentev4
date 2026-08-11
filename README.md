@@ -16,22 +16,36 @@ Repo inicializado con flujo obligatorio de pull request en `main` (ver
   se ejecutan en contenedores efímeros, no en el host.
 - Toolchain de Rust ([rustup](https://rustup.rs/)) para compilar el shell de
   Tauri v2 (`apps/desktop/src-tauri`).
-- Una clave de API de al menos un proveedor LLM soportado
-  (`anthropic`, `gemini`, `openai`, `ollama`, `openrouter`, `groq`) — se
-  introduce desde el panel de ajustes de la app en runtime, no por variable
-  de entorno ni fichero versionado.
+- Una clave de API de al menos un proveedor LLM remoto soportado
+  (`anthropic`, `gemini`, `openai`, `openrouter`, `groq`) — se introduce desde
+  el panel de ajustes de la app en runtime, no por variable de entorno ni
+  fichero versionado. `ollama` se ejecuta localmente y no requiere clave de
+  API.
 
 ## Arranque
 
 ```bash
 pnpm install
+```
+
+En una terminal, levanta el frontend de desarrollo:
+
+```bash
+pnpm --filter @agentev4/desktop dev
+```
+
+En otra, inicia Tauri:
+
+```bash
 pnpm tauri dev
 ```
 
-Esto compila el sidecar (`apps/desktop/server`) y levanta la app de
+Este segundo comando compila el sidecar (`apps/desktop/server`) y se conecta
+al frontend en `http://localhost:1420` para levantar la app de
 escritorio con recarga en caliente. Al abrir, selecciona una carpeta de
-workspace real, crea una sesión, añade tu clave de proveedor en Ajustes y
-manda un prompt.
+workspace real, configura el proveedor en Ajustes y manda un prompt. Si la
+carpeta todavía no tiene sesiones, la app crea y activa automáticamente una
+única `Sesión de prueba`; volver a abrir esa carpeta no crea duplicados.
 
 ## Tests
 

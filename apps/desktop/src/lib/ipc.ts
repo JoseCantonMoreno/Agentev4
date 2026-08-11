@@ -1,95 +1,197 @@
-import { Command, type Child } from "@tauri-apps/plugin-shell";
-import type { AgentIpcEvent } from "@agentev4/shared";
+import { Command } from "@tauri-apps/plugin-shell";
+import {
+  AgentMessageSchema,
+  SavedProviderSettingsSchema,
+  SessionConfigSchema,
+  type AgentIpcEvent,
+  type AgentMessage,
+  type SavedProviderSettings,
+  type SessionConfig
+} from "@agentev4/shared";
+import {
+  RpcClient,
+  type RpcCallOptions,
+  type RpcLifecycleEvent,
+  type RpcProcessFactory,
+  type RpcProcessHandlers,
+  type RpcWritableProcess
+} from "./rpc-client";
 
 type EventListener = (event: AgentIpcEvent) => void;
+type LifecycleListener = (event: RpcLifecycleEvent) => void;
+type Validator = (value: unknown) => unknown;
 
-interface PendingRequest {
-  resolve: (value: unknown) => void;
-  reject: (reason: Error) => void;
+interface ReadyWorkspaceResult {
+  workspacePath: string;
+  sessions: SessionConfig[];
+  activeSessionId: string;
+  messages: AgentMessage[];
+  tools: string[];
 }
 
-// ponytail: ruta relativa al cwd por defecto de un proceso Tauri en `tauri
-// dev` (la carpeta `src-tauri`). Solo válida en dev — el empaquetado
-// (`tauri build`) está explícitamente pospuesto (Fase 11), así que la
-// resolución de ruta para un sidecar embebido queda para cuando llegue esa fase.
+interface RpcResultMap {
+  initWorkspace: ReadyWorkspaceResult;
+  listSessions: SessionConfig[];
+  listMessages: AgentMessage[];
+  listTools: string[];
+  createSession: SessionConfig;
+  renameSession: SessionConfig;
+  deleteSession: { ok: true };
+  listCheckpoints: string[];
+  restoreCheckpoint: Record<string, unknown>;
+  setApiKey: { ok: true };
+  hasApiKey: { hasKey: boolean };
+  saveProviderSettings: SavedProviderSettings;
+  respondPermission: { ok: true };
+  sendPrompt: { haltReason: string; turnsUsed: number };
+}
+
+export type RpcMethod = keyof RpcResultMap;
+
 const SERVER_ENTRY = "../server/dist/index.js";
+const READ_TIMEOUT_MS = 30_000;
+const NON_EXPIRING_METHODS = new Set([
+  "sendPrompt",
+  "initWorkspace",
+  "createSession",
+  "renameSession",
+  "deleteSession",
+  "restoreCheckpoint",
+  "saveProviderSettings",
+  "setApiKey",
+  "respondPermission"
+]);
 
-let child: Child | undefined;
-let spawnPromise: Promise<Child> | undefined;
-let nextId = 1;
-let buffer = "";
-const pending = new Map<number, PendingRequest>();
-const listeners = new Set<EventListener>();
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
-function isAgentIpcEvent(value: unknown): value is AgentIpcEvent {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { type?: unknown }).type === "string" &&
-    (value as { type: string }).type.startsWith("agent:")
+function parseStringArray(value: unknown): string[] {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) throw new Error();
+  return value;
+}
+
+function parseOk(value: unknown): { ok: true } {
+  if (!isRecord(value) || value.ok !== true) throw new Error();
+  return { ok: true };
+}
+
+function parseHasKey(value: unknown): { hasKey: boolean } {
+  if (!isRecord(value) || typeof value.hasKey !== "boolean") throw new Error();
+  return { hasKey: value.hasKey };
+}
+
+function parseReadyWorkspace(value: unknown): unknown {
+  if (!isRecord(value)) throw new Error();
+  if (typeof value.workspacePath !== "string" || typeof value.activeSessionId !== "string") {
+    throw new Error();
+  }
+  return {
+    ...value,
+    sessions: SessionConfigSchema.array().parse(value.sessions),
+    messages: AgentMessageSchema.array().parse(value.messages),
+    tools: parseStringArray(value.tools)
+  };
+}
+
+function parsePromptResult(value: unknown): unknown {
+  if (
+    !isRecord(value) ||
+    typeof value.haltReason !== "string" ||
+    typeof value.turnsUsed !== "number" ||
+    !Number.isInteger(value.turnsUsed) ||
+    value.turnsUsed < 0
+  ) {
+    throw new Error();
+  }
+  return { haltReason: value.haltReason, turnsUsed: value.turnsUsed };
+}
+
+function parseRecord(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) throw new Error();
+  return value;
+}
+
+function parseSavedProviderSettings(value: unknown): unknown {
+  if (
+    !isRecord(value) ||
+    "apiKey" in value ||
+    (isRecord(value.config) && "apiKey" in value.config)
+  ) {
+    throw new Error();
+  }
+  return SavedProviderSettingsSchema.parse(value);
+}
+
+const responseValidators = {
+  initWorkspace: parseReadyWorkspace,
+  listSessions: (value) => SessionConfigSchema.array().parse(value),
+  listMessages: (value) => AgentMessageSchema.array().parse(value),
+  listTools: parseStringArray,
+  createSession: (value) => SessionConfigSchema.parse(value),
+  renameSession: (value) => SessionConfigSchema.parse(value),
+  deleteSession: parseOk,
+  listCheckpoints: parseStringArray,
+  restoreCheckpoint: parseRecord,
+  setApiKey: parseOk,
+  hasApiKey: parseHasKey,
+  saveProviderSettings: parseSavedProviderSettings,
+  respondPermission: parseOk,
+  sendPrompt: parsePromptResult
+} satisfies Record<RpcMethod, Validator>;
+
+export function rpcPolicyForMethod(method: string): Required<RpcCallOptions> {
+  return { timeoutMs: NON_EXPIRING_METHODS.has(method) ? false : READ_TIMEOUT_MS };
+}
+
+function containsApiKey(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsApiKey);
+  if (!isRecord(value)) return false;
+  return Object.entries(value).some(
+    ([key, nested]) => key.toLowerCase() === "apikey" || containsApiKey(nested)
   );
 }
 
-function handleLine(line: string): void {
-  if (line.trim().length === 0) return;
-
-  let parsed: unknown;
+export function validateRpcResult<M extends RpcMethod>(method: M, value: unknown): RpcResultMap[M] {
+  const validator = responseValidators[method];
   try {
-    parsed = JSON.parse(line);
+    if (containsApiKey(value)) throw new Error();
+    return validator(value) as RpcResultMap[M];
   } catch {
-    return;
+    throw new Error(`Respuesta RPC inv\u00e1lida para ${method}`);
   }
-
-  if (isAgentIpcEvent(parsed)) {
-    for (const listener of listeners) listener(parsed);
-    return;
-  }
-
-  const { id, result, error } = parsed as { id?: number; result?: unknown; error?: string };
-  if (typeof id !== "number") return;
-  const request = pending.get(id);
-  if (!request) return;
-  pending.delete(id);
-  if (error) request.reject(new Error(error));
-  else request.resolve(result);
 }
 
-async function ensureServer(): Promise<Child> {
-  if (child) return child;
-  spawnPromise ??= (async () => {
+class TauriRpcProcessFactory implements RpcProcessFactory {
+  async start(handlers: RpcProcessHandlers): Promise<RpcWritableProcess> {
     const command = Command.create("node", [SERVER_ENTRY]);
-    command.stdout.on("data", (chunk: string) => {
-      buffer += chunk;
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) handleLine(line);
-    });
+    command.on("close", handlers.close);
+    command.on("error", (error) => handlers.error(String(error)));
+    command.stdout.on("data", handlers.stdout);
     command.stderr.on("data", (chunk: string) => {
+      handlers.stderr(chunk);
       console.error("[agent-server]", chunk);
     });
-    const spawned = await command.spawn();
-    child = spawned;
-    return spawned;
-  })();
-  return spawnPromise;
+    const child = await command.spawn();
+    return { write: (data) => child.write(data) };
+  }
 }
 
-/** Invoca un método del agent-server (JSON-RPC por stdio) y espera su respuesta. */
-export async function callServer<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
-  const process = await ensureServer();
-  const id = nextId++;
+const client = new RpcClient(new TauriRpcProcessFactory(), READ_TIMEOUT_MS);
 
-  return new Promise<T>((resolve, reject) => {
-    pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
-    void process.write(`${JSON.stringify({ id, method, params })}\n`).catch((writeError: unknown) => {
-      pending.delete(id);
-      reject(writeError instanceof Error ? writeError : new Error(String(writeError)));
-    });
-  });
+/** Invoca un metodo soportado, aplica su politica temporal y valida la respuesta. */
+export async function callServer<M extends RpcMethod>(
+  method: M,
+  params?: Record<string, unknown>
+): Promise<RpcResultMap[M]> {
+  const result = await client.call<unknown>(method, params, rpcPolicyForMethod(method));
+  return validateRpcResult(method, result);
 }
 
-/** Suscribe a los eventos `agent:*` emitidos por el sidecar. Devuelve una función para desuscribirse. */
 export function onServerEvent(listener: EventListener): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+  return client.subscribe(listener);
+}
+
+export function onServerLifecycle(listener: LifecycleListener): () => void {
+  return client.subscribeLifecycle(listener);
 }

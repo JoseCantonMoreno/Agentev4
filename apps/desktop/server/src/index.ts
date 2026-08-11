@@ -1,18 +1,18 @@
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { InitWorkspaceInputSchema } from "@agentev4/shared";
 import type {
   AgentIpcEvent,
   AgentInterface,
   AgentMode,
+  InitWorkspaceInput,
   LlmProviderConfig,
   LlmProviderName,
   PermissionMode,
+  SavedProviderSettings,
   ToolCall
 } from "@agentev4/shared";
 import {
   KeyStore,
-  type DatabaseHandle,
   type CanUseTool,
   type PermissionDecision,
   PermissionEngine,
@@ -20,11 +20,12 @@ import {
   countContextTokens,
   createMastraAgentFactory,
   createResilientAgent,
-  openDatabase,
   runAgenticLoop
 } from "@agentev4/core";
 import { createStaticToolRegistry, executeRegisteredTool } from "@agentev4/tools";
+import { saveProviderSettings } from "./provider-settings.js";
 import { encodeLine, isRpcRequest, parseLines, type RpcRequest } from "./protocol.js";
+import { switchWorkspace, type WorkspaceState } from "./workspace.js";
 
 const SYSTEM_PROMPT = "You are Agentev4, an autonomous coding agent.";
 // ponytail: sin tabla de límites por modelo todavía; sube a un lookup real
@@ -32,40 +33,68 @@ const SYSTEM_PROMPT = "You are Agentev4, an autonomous coding agent.";
 const MAX_CONTEXT_TOKENS = 200_000;
 const DEFAULT_GOVERNANCE = { maxTurns: 8, maxBudgetUsd: 1, effortLevel: "medium" as const };
 
-interface ServerState {
-  workspacePath?: string;
-  dbHandle?: DatabaseHandle;
-  sessionManager?: SessionManager;
+interface ServerState extends WorkspaceState {
+  providerSettings?: SavedProviderSettings["config"];
   readonly keyStore: KeyStore;
   readonly pendingPermissions: Map<string, (decision: PermissionDecision) => void>;
 }
 
 const state: ServerState = { keyStore: new KeyStore(), pendingPermissions: new Map() };
+const activePrompts = new Set<string>();
+let workspaceTransitionInProgress = false;
+
+function assertNoActivePrompts(): void {
+  if (activePrompts.size > 0) {
+    throw new Error("Hay un prompt activo; espera a que termine antes de cambiar de workspace.");
+  }
+}
+
+function assertNoWorkspaceTransition(): void {
+  if (workspaceTransitionInProgress) {
+    throw new Error("Hay un cambio de workspace en curso; espera a que termine.");
+  }
+}
+
+function assertSessionMutationAllowed(): void {
+  assertNoWorkspaceTransition();
+  assertNoActivePrompts();
+}
 
 function requireSessionManager(): SessionManager {
-  if (!state.sessionManager) throw new Error("Ningún workspace inicializado todavía (llama a initWorkspace primero).");
+  if (!state.sessionManager)
+    throw new Error("Ningún workspace inicializado todavía (llama a initWorkspace primero).");
   return state.sessionManager;
 }
 
 function requireWorkspacePath(): string {
-  if (!state.workspacePath) throw new Error("Ningún workspace inicializado todavía (llama a initWorkspace primero).");
+  if (!state.workspacePath)
+    throw new Error("Ningún workspace inicializado todavía (llama a initWorkspace primero).");
   return state.workspacePath;
 }
 
-async function initWorkspace(params: { workspacePath: string }) {
-  await mkdir(join(params.workspacePath, ".agente"), { recursive: true });
-  state.dbHandle?.close();
-
-  const handle = openDatabase(join(params.workspacePath, ".agente", "sessions.db"));
-  state.workspacePath = params.workspacePath;
-  state.dbHandle = handle;
-  state.sessionManager = new SessionManager(handle.db);
-
-  return { workspacePath: params.workspacePath, sessions: state.sessionManager.listSessions() };
+async function initWorkspace(input: Record<string, unknown> | undefined) {
+  const params: InitWorkspaceInput = InitWorkspaceInputSchema.parse(input);
+  assertNoActivePrompts();
+  assertNoWorkspaceTransition();
+  workspaceTransitionInProgress = true;
+  try {
+    return await switchWorkspace(state, params.workspacePath, {
+      defaultMode: params.defaultMode,
+      defaultPermissionMode: params.defaultPermissionMode,
+      listTools: () => Object.keys(createStaticToolRegistry()),
+      beforeCommit: assertNoActivePrompts
+    });
+  } finally {
+    workspaceTransitionInProgress = false;
+  }
 }
 
 /** Envuelve el `AgentInterface` resiliente para emitir `agent:thought` en cada turno LLM. */
-function withThoughtEvents(agent: AgentInterface, sessionId: string, emit: (event: AgentIpcEvent) => void): AgentInterface {
+function withThoughtEvents(
+  agent: AgentInterface,
+  sessionId: string,
+  emit: (event: AgentIpcEvent) => void
+): AgentInterface {
   return {
     async run(input) {
       const result = await agent.run(input);
@@ -86,13 +115,10 @@ function bridgedCanUseTool(sessionId: string, emit: (event: AgentIpcEvent) => vo
     });
 }
 
-async function sendPrompt(
+async function executePrompt(
   params: {
     sessionId: string;
     prompt: string;
-    provider: LlmProviderName;
-    model: string;
-    baseUrl?: string;
     disabledTools?: string[];
   },
   emit: (event: AgentIpcEvent) => void
@@ -101,13 +127,14 @@ async function sendPrompt(
   const session = sessionManager.getSession(params.sessionId);
   if (!session) throw new Error(`Sesión "${params.sessionId}" no existe.`);
 
+  const config = state.providerSettings;
+  if (!config) throw new Error("No hay configuración de proveedor guardada todavía.");
+
   sessionManager.appendMessage(params.sessionId, { role: "user", content: params.prompt });
 
   const providerConfig: LlmProviderConfig = {
-    provider: params.provider,
-    model: params.model,
-    apiKey: state.keyStore.get(params.provider),
-    baseUrl: params.baseUrl
+    ...config,
+    apiKey: state.keyStore.get(config.provider)
   };
   const agent = withThoughtEvents(
     createResilientAgent(createMastraAgentFactory().create(providerConfig), undefined),
@@ -165,31 +192,70 @@ async function sendPrompt(
   return { haltReason: result.haltReason, turnsUsed: result.turnsUsed };
 }
 
-type Handler = (params: Record<string, unknown> | undefined, emit: (event: AgentIpcEvent) => void) => Promise<unknown>;
+async function sendPrompt(
+  params: {
+    sessionId: string;
+    prompt: string;
+    disabledTools?: string[];
+  },
+  emit: (event: AgentIpcEvent) => void
+) {
+  assertNoWorkspaceTransition();
+  if (activePrompts.has(params.sessionId)) {
+    throw new Error(`La sesión "${params.sessionId}" ya tiene un prompt activo.`);
+  }
+
+  activePrompts.add(params.sessionId);
+  try {
+    return await executePrompt(params, emit);
+  } finally {
+    activePrompts.delete(params.sessionId);
+  }
+}
+
+type Handler = (
+  params: Record<string, unknown> | undefined,
+  emit: (event: AgentIpcEvent) => void
+) => Promise<unknown>;
 
 function cast<T>(params: Record<string, unknown> | undefined): T {
   return params as T;
 }
 
-const handlers: Record<string, Handler> = {
-  initWorkspace: (p) => initWorkspace(cast(p)),
+export const handlers: Record<string, Handler> = {
+  initWorkspace: (p) => initWorkspace(p),
   listSessions: async () => requireSessionManager().listSessions(),
-  listMessages: async (p) => requireSessionManager().listMessages(cast<{ sessionId: string }>(p).sessionId),
+  listMessages: async (p) =>
+    requireSessionManager().listMessages(cast<{ sessionId: string }>(p).sessionId),
   listTools: async () => Object.keys(createStaticToolRegistry()),
   createSession: async (p) => {
-    const { name, mode, permissionMode } = cast<{ name: string; mode: AgentMode; permissionMode: PermissionMode }>(p);
-    return requireSessionManager().createSession({ name, mode, permissionMode, workspacePath: requireWorkspacePath() });
+    assertSessionMutationAllowed();
+    const { name, mode, permissionMode } = cast<{
+      name: string;
+      mode: AgentMode;
+      permissionMode: PermissionMode;
+    }>(p);
+    return requireSessionManager().createSession({
+      name,
+      mode,
+      permissionMode,
+      workspacePath: requireWorkspacePath()
+    });
   },
   renameSession: async (p) => {
+    assertSessionMutationAllowed();
     const { sessionId, name } = cast<{ sessionId: string; name: string }>(p);
     return requireSessionManager().renameSession(sessionId, name);
   },
   deleteSession: async (p) => {
+    assertSessionMutationAllowed();
     requireSessionManager().deleteSession(cast<{ sessionId: string }>(p).sessionId);
     return { ok: true };
   },
-  listCheckpoints: async (p) => requireSessionManager().listCheckpoints(cast<{ sessionId: string }>(p).sessionId),
+  listCheckpoints: async (p) =>
+    requireSessionManager().listCheckpoints(cast<{ sessionId: string }>(p).sessionId),
   restoreCheckpoint: async (p) => {
+    assertSessionMutationAllowed();
     const { sessionId, checkpointId } = cast<{ sessionId: string; checkpointId: string }>(p);
     return requireSessionManager().restoreCheckpoint(sessionId, checkpointId);
   },
@@ -198,11 +264,19 @@ const handlers: Record<string, Handler> = {
     state.keyStore.set(provider, apiKey);
     return { ok: true };
   },
-  hasApiKey: async (p) => ({ hasKey: state.keyStore.has(cast<{ provider: LlmProviderName }>(p).provider) }),
+  hasApiKey: async (p) => ({
+    hasKey: state.keyStore.has(cast<{ provider: LlmProviderName }>(p).provider)
+  }),
+  saveProviderSettings: async (p) => {
+    const saved = saveProviderSettings(state.keyStore, p);
+    state.providerSettings = saved.config;
+    return saved;
+  },
   respondPermission: async (p) => {
     const { requestId, decision } = cast<{ requestId: string; decision: PermissionDecision }>(p);
     const resolve = state.pendingPermissions.get(requestId);
-    if (!resolve) throw new Error(`No hay una solicitud de permiso pendiente con id "${requestId}".`);
+    if (!resolve)
+      throw new Error(`No hay una solicitud de permiso pendiente con id "${requestId}".`);
     state.pendingPermissions.delete(requestId);
     resolve(decision);
     return { ok: true };
@@ -212,9 +286,6 @@ const handlers: Record<string, Handler> = {
       cast<{
         sessionId: string;
         prompt: string;
-        provider: LlmProviderName;
-        model: string;
-        baseUrl?: string;
         disabledTools?: string[];
       }>(p),
       emit

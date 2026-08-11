@@ -10,7 +10,8 @@ import type {
   PermissionMode,
   SessionConfig
 } from "@agentev4/shared";
-import { onServerEvent } from "../lib/ipc";
+import { onServerEvent, onServerLifecycle } from "../lib/ipc";
+import type { WorkspaceLifecycleAction } from "../lib/workspace";
 
 export interface ProviderConfig {
   provider: LlmProviderName;
@@ -18,8 +19,15 @@ export interface ProviderConfig {
   baseUrl: string;
 }
 
-interface AppState {
+export interface AppNotification {
+  id: string;
+  kind: "success";
+  message: string;
+}
+
+export interface AppState {
   workspacePath: string | null;
+  workspaceStatus: "idle" | "selecting" | "preparing" | "ready";
   sessions: SessionConfig[];
   activeSessionId: string | null;
   messages: AgentMessage[];
@@ -29,7 +37,10 @@ interface AppState {
   pendingPermission: AgentPermissionRequestEvent | null;
   settingsOpen: boolean;
   sending: boolean;
+  activeRunId: string | null;
+  serverEpoch: number;
   error: string | null;
+  notification: AppNotification | null;
   providerConfig: ProviderConfig;
   availableTools: string[];
   disabledTools: Set<string>;
@@ -37,23 +48,34 @@ interface AppState {
   defaultPermissionMode: PermissionMode;
 }
 
-type Action =
-  | { type: "WORKSPACE_LOADED"; workspacePath: string; sessions: SessionConfig[] }
-  | { type: "SESSIONS_SET"; sessions: SessionConfig[] }
-  | { type: "SESSION_ACTIVATED"; sessionId: string | null; messages: AgentMessage[] }
-  | { type: "MESSAGES_SET"; messages: AgentMessage[] }
-  | { type: "SENDING_SET"; sending: boolean }
+export type Action =
+  | WorkspaceLifecycleAction
+  | { type: "SESSIONS_SET"; workspacePath: string; sessions: SessionConfig[] }
+  | {
+      type: "SESSION_ACTIVATED";
+      workspacePath: string;
+      sessionId: string | null;
+      messages: AgentMessage[];
+    }
+  | { type: "MESSAGES_SET"; sessionId: string; messages: AgentMessage[] }
+  | { type: "SENDING_STARTED"; runId: string }
+  | { type: "SENDING_FINISHED"; runId: string }
+  | { type: "SERVER_PROCESS_FAILED"; error: string }
   | { type: "SETTINGS_TOGGLE" }
   | { type: "ERROR_SET"; error: string | null }
+  | { type: "ERROR_CLEAR" }
+  | { type: "NOTIFICATION_SET"; notification: AppNotification }
+  | { type: "NOTIFICATION_CLEAR"; id: string }
   | { type: "SERVER_EVENT"; event: AgentIpcEvent }
   | { type: "PERMISSION_RESOLVED" }
-  | { type: "PROVIDER_CONFIG_SET"; config: Partial<ProviderConfig> }
+  | { type: "PROVIDER_CONFIG_COMMITTED"; config: ProviderConfig }
   | { type: "TOOLS_SET"; tools: string[] }
   | { type: "TOOL_TOGGLED"; tool: string }
   | { type: "DEFAULTS_SET"; mode?: AgentMode; permissionMode?: PermissionMode };
 
-const initialState: AppState = {
+export const initialState: AppState = {
   workspacePath: null,
+  workspaceStatus: "idle",
   sessions: [],
   activeSessionId: null,
   messages: [],
@@ -63,7 +85,10 @@ const initialState: AppState = {
   pendingPermission: null,
   settingsOpen: false,
   sending: false,
+  activeRunId: null,
+  serverEpoch: 0,
   error: null,
+  notification: null,
   providerConfig: { provider: "anthropic", model: "claude-sonnet-5", baseUrl: "" },
   availableTools: [],
   disabledTools: new Set(),
@@ -71,22 +96,60 @@ const initialState: AppState = {
   defaultPermissionMode: "default"
 };
 
-function reducer(state: AppState, action: Action): AppState {
+function hasLoadedWorkspace(state: AppState): boolean {
+  return state.workspacePath !== null;
+}
+
+export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
-    case "WORKSPACE_LOADED":
+    case "WORKSPACE_SELECTION_STARTED":
+      if (state.sending) return state;
+      return { ...state, workspaceStatus: "selecting", error: null };
+    case "WORKSPACE_SELECTION_CANCELLED":
       return {
         ...state,
-        workspacePath: action.workspacePath,
-        sessions: action.sessions,
-        activeSessionId: null,
-        messages: [],
+        workspaceStatus: hasLoadedWorkspace(state) ? "ready" : "idle"
+      };
+    case "WORKSPACE_PREPARING":
+      if (state.sending) return state;
+      return { ...state, workspaceStatus: "preparing", error: null };
+    case "WORKSPACE_READY":
+      if (state.sending) return state;
+      return {
+        ...state,
+        workspacePath: action.ready.workspacePath,
+        workspaceStatus: "ready",
+        sessions: action.ready.sessions,
+        activeSessionId: action.ready.activeSessionId,
+        messages: action.ready.messages,
+        availableTools: action.ready.tools,
         thoughts: [],
         toolCalls: [],
-        context: null
+        context: null,
+        pendingPermission: null,
+        error: null
+      };
+    case "WORKSPACE_PREPARATION_FAILED":
+      return {
+        ...state,
+        workspaceStatus: hasLoadedWorkspace(state) ? "ready" : "idle",
+        error: action.error
       };
     case "SESSIONS_SET":
+      if (
+        state.sending ||
+        state.workspaceStatus !== "ready" ||
+        action.workspacePath !== state.workspacePath
+      )
+        return state;
       return { ...state, sessions: action.sessions };
     case "SESSION_ACTIVATED":
+      if (
+        state.sending ||
+        state.workspaceStatus !== "ready" ||
+        action.workspacePath !== state.workspacePath
+      )
+        return state;
       return {
         ...state,
         activeSessionId: action.sessionId,
@@ -96,17 +159,48 @@ function reducer(state: AppState, action: Action): AppState {
         context: null
       };
     case "MESSAGES_SET":
+      if (action.sessionId !== state.activeSessionId) return state;
       return { ...state, messages: action.messages };
-    case "SENDING_SET":
-      return { ...state, sending: action.sending };
+    case "SENDING_STARTED":
+      if (state.activeRunId) return state;
+      return { ...state, sending: true, activeRunId: action.runId };
+    case "SENDING_FINISHED":
+      if (state.activeRunId !== action.runId) return state;
+      return { ...state, sending: false, activeRunId: null };
+    case "SERVER_PROCESS_FAILED":
+      return {
+        ...state,
+        workspacePath: null,
+        workspaceStatus: "idle",
+        sessions: [],
+        activeSessionId: null,
+        messages: [],
+        thoughts: [],
+        toolCalls: [],
+        context: null,
+        pendingPermission: null,
+        sending: false,
+        activeRunId: null,
+        serverEpoch: state.serverEpoch + 1,
+        providerConfig: initialState.providerConfig,
+        availableTools: [],
+        disabledTools: new Set(),
+        error: action.error
+      };
     case "SETTINGS_TOGGLE":
       return { ...state, settingsOpen: !state.settingsOpen };
     case "ERROR_SET":
       return { ...state, error: action.error };
+    case "ERROR_CLEAR":
+      return { ...state, error: null };
+    case "NOTIFICATION_SET":
+      return { ...state, notification: action.notification };
+    case "NOTIFICATION_CLEAR":
+      return state.notification?.id === action.id ? { ...state, notification: null } : state;
     case "PERMISSION_RESOLVED":
       return { ...state, pendingPermission: null };
-    case "PROVIDER_CONFIG_SET":
-      return { ...state, providerConfig: { ...state.providerConfig, ...action.config } };
+    case "PROVIDER_CONFIG_COMMITTED":
+      return { ...state, providerConfig: action.config };
     case "TOOLS_SET":
       return { ...state, availableTools: action.tools };
     case "TOOL_TOGGLED": {
@@ -149,6 +243,17 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
   useEffect(() => onServerEvent((event) => dispatch({ type: "SERVER_EVENT", event })), []);
+  useEffect(
+    () =>
+      onServerLifecycle((event) => {
+        if (event.type === "process:stopped") {
+          dispatch({ type: "SERVER_PROCESS_FAILED", error: event.message });
+        } else if (event.type === "protocol:error") {
+          dispatch({ type: "ERROR_SET", error: event.message });
+        }
+      }),
+    []
+  );
 
   const value = useMemo(() => ({ state, dispatch }), [state]);
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
