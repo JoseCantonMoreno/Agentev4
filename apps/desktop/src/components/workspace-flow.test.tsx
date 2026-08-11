@@ -154,6 +154,28 @@ describe("workspace-to-chat flow", () => {
     expect(screen.getByText("Selecciona una carpeta para preparar el agente.")).not.toBeNull();
   });
 
+  it.each([
+    ["idle", "Selecciona una carpeta para preparar el agente."],
+    ["selecting", "Seleccionando carpeta…"],
+    ["preparing", "Preparando workspace y sesión…"],
+    ["ready-without-session", "Selecciona o crea una sesión para empezar."]
+  ] as const)("announces the %s chat state politely", (chatState, message) => {
+    render(
+      <AppStateProvider>
+        {chatState === "selecting" && <StateSetup status="selecting" />}
+        {chatState === "preparing" && <StateSetup status="preparing" />}
+        {chatState === "ready-without-session" && (
+          <StateSetup ready={readyWorkspaceFixture()} withoutSession />
+        )}
+        <ChatPanel />
+      </AppStateProvider>
+    );
+
+    const status = screen.getByRole("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.textContent).toContain(message);
+  });
+
   it("shows selecting and preparing states while a workspace is opening", () => {
     const { rerender } = render(
       <AppStateProvider>
@@ -189,6 +211,19 @@ describe("workspace-to-chat flow", () => {
     const prompt = await screen.findByPlaceholderText("Escribe un prompt…");
     expect(prompt).toBe(document.activeElement);
     expect(screen.getByText("C:\\repo")).not.toBeNull();
+  });
+
+  it("exposes the ready chat history as a polite live log", () => {
+    render(
+      <AppStateProvider>
+        <StateSetup ready={readyWorkspaceFixture()} />
+        <ChatPanel />
+      </AppStateProvider>
+    );
+
+    const history = screen.getByRole("log", { name: "Historial del chat" });
+    expect(history.getAttribute("aria-live")).toBe("polite");
+    expect(history.getAttribute("aria-relevant")).toBe("additions text");
   });
 
   it("explains that a ready workspace without a session cannot chat yet", () => {

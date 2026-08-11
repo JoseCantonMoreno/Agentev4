@@ -4,6 +4,18 @@ import { callServer } from "../lib/ipc";
 import { listSessionMessages } from "../lib/workspace";
 import { useAppState } from "../state/store";
 
+function ChatStatus({ children }: { children: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex flex-1 items-center justify-center text-neutral-500"
+    >
+      {children}
+    </div>
+  );
+}
+
 export function ChatPanel() {
   const { state, dispatch } = useAppState();
   const [prompt, setPrompt] = useState("");
@@ -38,48 +50,38 @@ export function ChatPanel() {
   }
 
   if (state.workspaceStatus === "idle") {
-    return (
-      <div className="flex flex-1 items-center justify-center text-neutral-500">
-        Selecciona una carpeta para preparar el agente.
-      </div>
-    );
+    return <ChatStatus>Selecciona una carpeta para preparar el agente.</ChatStatus>;
   }
 
   if (state.workspaceStatus === "selecting") {
-    return (
-      <div className="flex flex-1 items-center justify-center text-neutral-500">
-        Seleccionando carpeta…
-      </div>
-    );
+    return <ChatStatus>Seleccionando carpeta…</ChatStatus>;
   }
 
   if (state.workspaceStatus === "preparing") {
-    return (
-      <div className="flex flex-1 items-center justify-center text-neutral-500">
-        Preparando workspace y sesión…
-      </div>
-    );
+    return <ChatStatus>Preparando workspace y sesión…</ChatStatus>;
   }
 
   if (!state.activeSessionId) {
-    return (
-      <div className="flex flex-1 items-center justify-center text-neutral-500">
-        Selecciona o crea una sesión para empezar.
-      </div>
-    );
+    return <ChatStatus>Selecciona o crea una sesión para empezar.</ChatStatus>;
   }
 
   return (
     <div className="flex flex-1 flex-col gap-3 overflow-hidden">
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto rounded-md border border-neutral-800 bg-neutral-900 p-3">
+      <div
+        role="log"
+        aria-label="Historial del chat"
+        aria-live="polite"
+        aria-relevant="additions text"
+        className="flex flex-1 flex-col gap-3 overflow-y-auto rounded-md border border-neutral-800 bg-neutral-900 p-3"
+      >
         {state.messages.map((message) => (
-          <div
+          <article
             key={message.id}
             className={`text-sm ${message.role === "user" ? "text-neutral-100" : "text-neutral-300"}`}
           >
             <span className="mr-2 font-semibold uppercase text-neutral-500">{message.role}</span>
             <span className="whitespace-pre-wrap">{message.content}</span>
-          </div>
+          </article>
         ))}
 
         {state.toolCalls.map((event) => (
