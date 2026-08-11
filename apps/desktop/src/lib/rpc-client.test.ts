@@ -61,6 +61,65 @@ afterEach(() => {
 });
 
 describe("RpcClient", () => {
+  it("keeps an explicitly non-expiring request pending beyond the default timeout", async () => {
+    vi.useFakeTimers();
+    const factory = new FakeProcessFactory();
+    const client = new RpcClient(factory, 50);
+    const pending = client.call<string>("sendPrompt", undefined, { timeoutMs: false });
+    const settled = vi.fn();
+    void pending.then(settled);
+    await factory.started();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(settled).not.toHaveBeenCalled();
+
+    factory.stdout('{"id":1,"result":"completed"}\n');
+    await expect(pending).resolves.toBe("completed");
+  });
+
+  it("rejects invalid agent events and reports an observable protocol failure", async () => {
+    const factory = new FakeProcessFactory();
+    const client = new RpcClient(factory, 1_000);
+    const eventListener = vi.fn();
+    const lifecycleListener = vi.fn();
+    client.subscribe(eventListener);
+    client.subscribeLifecycle(lifecycleListener);
+    const pending = client.call("ping");
+    await factory.started();
+
+    factory.stdout(
+      '{"type":"agent:thought","sessionId":"session-1","apiKey":"secret-not-observable"}\n'
+    );
+    factory.stdout('{"id":1,"result":null}\n');
+
+    await expect(pending).resolves.toBeNull();
+    expect(eventListener).not.toHaveBeenCalled();
+    expect(lifecycleListener).toHaveBeenCalledWith({
+      type: "protocol:error",
+      message: "El servidor del agente envi\u00f3 un evento inv\u00e1lido"
+    });
+    expect(JSON.stringify(lifecycleListener.mock.calls)).not.toContain("secret-not-observable");
+  });
+
+  it("publishes process lifecycle without leaking request parameters", async () => {
+    const factory = new FakeProcessFactory();
+    const client = new RpcClient(factory, 1_000);
+    const lifecycleListener = vi.fn();
+    client.subscribeLifecycle(lifecycleListener);
+    const pending = client.call("setApiKey", { apiKey: "sk-lifecycle-secret" });
+    await factory.started();
+
+    factory.close({ code: 1, signal: null });
+
+    await expect(pending).rejects.toThrow();
+    expect(lifecycleListener).toHaveBeenCalledWith({ type: "process:started" });
+    expect(lifecycleListener).toHaveBeenCalledWith({
+      type: "process:stopped",
+      message: "El servidor del agente se cerr\u00f3"
+    });
+    expect(JSON.stringify(lifecycleListener.mock.calls)).not.toContain("sk-lifecycle-secret");
+  });
+
   it("resolves a response framed across stdout chunks", async () => {
     const factory = new FakeProcessFactory();
     const client = new RpcClient(factory, 1_000);

@@ -9,7 +9,7 @@
     "shell:allow-stdin-write",
     {
       "identifier": "shell:allow-spawn",
-      "allow": [{ "name": "node", "cmd": "node", "args": true }]
+      "allow": [{ "name": "node", "cmd": "node", "args": ["../server/dist/index.js"] }]
     }
   ]
 }

@@ -1,4 +1,4 @@
-import type { AgentIpcEvent } from "@agentev4/shared";
+import { AgentIpcEventSchema, type AgentIpcEvent } from "@agentev4/shared";
 
 export interface RpcWritableProcess {
   write(data: string): Promise<void>;
@@ -16,20 +16,21 @@ export interface RpcProcessFactory {
 }
 
 export type EventListener = (event: AgentIpcEvent) => void;
+export type RpcLifecycleEvent =
+  | { type: "process:started" }
+  | { type: "process:stopped"; message: string }
+  | { type: "protocol:error"; message: string };
+export type LifecycleListener = (event: RpcLifecycleEvent) => void;
+
+export interface RpcCallOptions {
+  /** `false` evita abandonar en cliente una operacion que sigue viva en servidor. */
+  timeoutMs?: number | false;
+}
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
-  timeout: ReturnType<typeof setTimeout>;
-}
-
-function isAgentIpcEvent(value: unknown): value is AgentIpcEvent {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { type?: unknown }).type === "string" &&
-    (value as { type: string }).type.startsWith("agent:")
-  );
+  timeout: ReturnType<typeof setTimeout> | undefined;
 }
 
 function toError(value: unknown, fallback: string): Error {
@@ -41,6 +42,7 @@ function toError(value: unknown, fallback: string): Error {
 export class RpcClient {
   private readonly pending = new Map<number, PendingRequest>();
   private readonly listeners = new Set<EventListener>();
+  private readonly lifecycleListeners = new Set<LifecycleListener>();
   private nextId = 1;
   private buffer = "";
   private process: RpcWritableProcess | undefined;
@@ -53,9 +55,9 @@ export class RpcClient {
     private readonly timeoutMs = 30_000
   ) {}
 
-  call<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+  call<T>(method: string, params?: Record<string, unknown>, options?: RpcCallOptions): Promise<T> {
     return this.ensureProcess().then(
-      (process) => this.writeRequest<T>(process, method, params),
+      (process) => this.writeRequest<T>(process, method, params, options),
       (error: unknown) =>
         Promise.reject(toError(error, "No se pudo iniciar el servidor del agente"))
     );
@@ -66,6 +68,11 @@ export class RpcClient {
     return () => this.listeners.delete(listener);
   }
 
+  subscribeLifecycle(listener: LifecycleListener): () => void {
+    this.lifecycleListeners.add(listener);
+    return () => this.lifecycleListeners.delete(listener);
+  }
+
   private ensureProcess(): Promise<RpcWritableProcess> {
     if (this.process) return Promise.resolve(this.process);
     if (this.startPromise) return this.startPromise;
@@ -74,17 +81,35 @@ export class RpcClient {
     const startup = this.factory.start({
       stdout: (chunk) => this.handleStdout(generation, chunk),
       stderr: () => undefined,
-      close: () => this.stop(generation, new Error("El servidor del agente se cerró")),
-      error: (message) => this.stop(generation, toError(message, "El servidor del agente falló"))
+      close: () =>
+        this.stop(
+          generation,
+          new Error("El servidor del agente se cerr\u00f3"),
+          "El servidor del agente se cerr\u00f3"
+        ),
+      error: (message) =>
+        this.stop(
+          generation,
+          toError(message, "El servidor del agente fall\u00f3"),
+          "El servidor del agente fall\u00f3"
+        )
     });
-    const startPromise = startup.then((process) => {
-      if (this.generation !== generation) {
-        throw new Error("El servidor del agente se cerró");
+    const startPromise = startup.then(
+      (process) => {
+        if (this.generation !== generation) {
+          throw new Error("El servidor del agente se cerr\u00f3");
+        }
+        this.process = process;
+        this.processGeneration = generation;
+        this.emitLifecycle({ type: "process:started" });
+        return process;
+      },
+      (error: unknown) => {
+        const failure = toError(error, "No se pudo iniciar el servidor del agente");
+        this.stop(generation, failure, "No se pudo iniciar el servidor del agente");
+        throw failure;
       }
-      this.process = process;
-      this.processGeneration = generation;
-      return process;
-    });
+    );
 
     this.startPromise = startPromise;
     void startPromise.catch(() => {
@@ -96,21 +121,26 @@ export class RpcClient {
   private writeRequest<T>(
     process: RpcWritableProcess,
     method: string,
-    params: Record<string, unknown> | undefined
+    params: Record<string, unknown> | undefined,
+    options: RpcCallOptions | undefined
   ): Promise<T> {
     if (this.process !== process) {
-      return Promise.reject(new Error("El servidor del agente se cerró"));
+      return Promise.reject(new Error("El servidor del agente se cerr\u00f3"));
     }
 
     const generation = this.processGeneration;
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        const request = this.pending.get(id);
-        if (!request) return;
-        this.pending.delete(id);
-        request.reject(new Error("Tiempo de espera agotado"));
-      }, this.timeoutMs);
+      const timeoutMs = options?.timeoutMs ?? this.timeoutMs;
+      const timeout =
+        timeoutMs === false
+          ? undefined
+          : setTimeout(() => {
+              const request = this.pending.get(id);
+              if (!request) return;
+              this.pending.delete(id);
+              request.reject(new Error("Tiempo de espera agotado"));
+            }, timeoutMs);
 
       this.pending.set(id, {
         resolve: resolve as (value: unknown) => void,
@@ -119,7 +149,11 @@ export class RpcClient {
       });
 
       void process.write(`${JSON.stringify({ id, method, params })}\n`).catch((error: unknown) => {
-        this.stop(generation, toError(error, "No se pudo escribir al servidor del agente"));
+        this.stop(
+          generation,
+          toError(error, "No se pudo escribir al servidor del agente"),
+          "No se pudo escribir al servidor del agente"
+        );
       });
     });
   }
@@ -147,8 +181,21 @@ export class RpcClient {
       return;
     }
 
-    if (isAgentIpcEvent(payload)) {
-      for (const listener of this.listeners) listener(payload);
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      typeof (payload as { type?: unknown }).type === "string" &&
+      (payload as { type: string }).type.startsWith("agent:")
+    ) {
+      const event = AgentIpcEventSchema.safeParse(payload);
+      if (!event.success) {
+        this.emitLifecycle({
+          type: "protocol:error",
+          message: "El servidor del agente envi\u00f3 un evento inv\u00e1lido"
+        });
+        return;
+      }
+      for (const listener of this.listeners) listener(event.data);
       return;
     }
 
@@ -160,15 +207,15 @@ export class RpcClient {
     if (!request) return;
 
     this.pending.delete(response.id);
-    clearTimeout(request.timeout);
+    if (request.timeout) clearTimeout(request.timeout);
     if (response.error !== undefined && response.error !== null) {
-      request.reject(toError(response.error, "El servidor del agente devolvió un error"));
+      request.reject(toError(response.error, "El servidor del agente devolvi\u00f3 un error"));
       return;
     }
     request.resolve(response.result);
   }
 
-  private stop(generation: number, error: Error): void {
+  private stop(generation: number, error: Error, lifecycleMessage: string): void {
     if (this.generation !== generation) return;
 
     this.generation += 1;
@@ -176,10 +223,15 @@ export class RpcClient {
     this.processGeneration = 0;
     this.startPromise = undefined;
     this.buffer = "";
+    this.emitLifecycle({ type: "process:stopped", message: lifecycleMessage });
     for (const request of this.pending.values()) {
-      clearTimeout(request.timeout);
+      if (request.timeout) clearTimeout(request.timeout);
       request.reject(error);
     }
     this.pending.clear();
+  }
+
+  private emitLifecycle(event: RpcLifecycleEvent): void {
+    for (const listener of this.lifecycleListeners) listener(event);
   }
 }

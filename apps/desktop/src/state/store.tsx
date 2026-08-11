@@ -10,7 +10,7 @@ import type {
   PermissionMode,
   SessionConfig
 } from "@agentev4/shared";
-import { onServerEvent } from "../lib/ipc";
+import { onServerEvent, onServerLifecycle } from "../lib/ipc";
 import type { WorkspaceLifecycleAction } from "../lib/workspace";
 
 export interface ProviderConfig {
@@ -37,6 +37,7 @@ export interface AppState {
   pendingPermission: AgentPermissionRequestEvent | null;
   settingsOpen: boolean;
   sending: boolean;
+  activeRunId: string | null;
   error: string | null;
   notification: AppNotification | null;
   providerConfig: ProviderConfig;
@@ -51,7 +52,9 @@ export type Action =
   | { type: "SESSIONS_SET"; sessions: SessionConfig[] }
   | { type: "SESSION_ACTIVATED"; sessionId: string | null; messages: AgentMessage[] }
   | { type: "MESSAGES_SET"; sessionId: string; messages: AgentMessage[] }
-  | { type: "SENDING_SET"; sending: boolean }
+  | { type: "SENDING_STARTED"; runId: string }
+  | { type: "SENDING_FINISHED"; runId: string }
+  | { type: "SERVER_PROCESS_FAILED"; error: string }
   | { type: "SETTINGS_TOGGLE" }
   | { type: "ERROR_SET"; error: string | null }
   | { type: "ERROR_CLEAR" }
@@ -76,6 +79,7 @@ export const initialState: AppState = {
   pendingPermission: null,
   settingsOpen: false,
   sending: false,
+  activeRunId: null,
   error: null,
   notification: null,
   providerConfig: { provider: "anthropic", model: "claude-sonnet-5", baseUrl: "" },
@@ -140,8 +144,31 @@ export function reducer(state: AppState, action: Action): AppState {
     case "MESSAGES_SET":
       if (action.sessionId !== state.activeSessionId) return state;
       return { ...state, messages: action.messages };
-    case "SENDING_SET":
-      return { ...state, sending: action.sending };
+    case "SENDING_STARTED":
+      if (state.activeRunId) return state;
+      return { ...state, sending: true, activeRunId: action.runId };
+    case "SENDING_FINISHED":
+      if (state.activeRunId !== action.runId) return state;
+      return { ...state, sending: false, activeRunId: null };
+    case "SERVER_PROCESS_FAILED":
+      return {
+        ...state,
+        workspacePath: null,
+        workspaceStatus: "idle",
+        sessions: [],
+        activeSessionId: null,
+        messages: [],
+        thoughts: [],
+        toolCalls: [],
+        context: null,
+        pendingPermission: null,
+        sending: false,
+        activeRunId: null,
+        providerConfig: initialState.providerConfig,
+        availableTools: [],
+        disabledTools: new Set(),
+        error: action.error
+      };
     case "SETTINGS_TOGGLE":
       return { ...state, settingsOpen: !state.settingsOpen };
     case "ERROR_SET":
@@ -198,6 +225,17 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
   useEffect(() => onServerEvent((event) => dispatch({ type: "SERVER_EVENT", event })), []);
+  useEffect(
+    () =>
+      onServerLifecycle((event) => {
+        if (event.type === "process:stopped") {
+          dispatch({ type: "SERVER_PROCESS_FAILED", error: event.message });
+        } else if (event.type === "protocol:error") {
+          dispatch({ type: "ERROR_SET", error: event.message });
+        }
+      }),
+    []
+  );
 
   const value = useMemo(() => ({ state, dispatch }), [state]);
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

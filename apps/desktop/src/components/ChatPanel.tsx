@@ -1,5 +1,5 @@
 import { Send, Wrench } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { callServer } from "../lib/ipc";
 import { listSessionMessages } from "../lib/workspace";
 import { useAppState } from "../state/store";
@@ -7,13 +7,16 @@ import { useAppState } from "../state/store";
 export function ChatPanel() {
   const { state, dispatch } = useAppState();
   const [prompt, setPrompt] = useState("");
+  const runInFlight = useRef(false);
 
   async function handleSend() {
-    if (!prompt.trim() || !state.activeSessionId || state.sending) return;
+    if (!prompt.trim() || !state.activeSessionId || state.sending || runInFlight.current) return;
     const sessionId = state.activeSessionId;
     const text = prompt.trim();
+    const runId = crypto.randomUUID();
+    runInFlight.current = true;
     setPrompt("");
-    dispatch({ type: "SENDING_SET", sending: true });
+    dispatch({ type: "SENDING_STARTED", runId });
     dispatch({ type: "ERROR_SET", error: null });
     try {
       await callServer("sendPrompt", {
@@ -29,7 +32,8 @@ export function ChatPanel() {
         error: error instanceof Error ? error.message : String(error)
       });
     } finally {
-      dispatch({ type: "SENDING_SET", sending: false });
+      runInFlight.current = false;
+      dispatch({ type: "SENDING_FINISHED", runId });
     }
   }
 

@@ -175,6 +175,50 @@ async function createSession(handlers: Record<string, unknown>, workspacePath: s
 }
 
 describe("saveProviderSettings", () => {
+  it.each(["createSession", "renameSession", "deleteSession", "restoreCheckpoint"])(
+    "rejects workspace/session mutation %s while any prompt is active",
+    async (method) => {
+      const workspacePath = await mkdtemp(join(tmpdir(), "agentev4-active-mutation-"));
+      const runStarted = deferred<void>();
+      const finishRun = deferred<void>();
+      try {
+        const handlers = await loadHandlers();
+        const session = await createSession(handlers, workspacePath);
+        await getHandler(handlers, "saveProviderSettings")(
+          { provider: "ollama", model: "saved-model", baseUrl: "" },
+          () => undefined
+        );
+        testState.runLoopOverride = async (messages) => {
+          runStarted.resolve();
+          await finishRun.promise;
+          return { messages, haltReason: "end_turn", turnsUsed: 1, costUsd: 0 };
+        };
+
+        const prompt = getHandler(handlers, "sendPrompt")(
+          { sessionId: session.id, prompt: "keep mutation guard active" },
+          () => undefined
+        );
+        await runStarted.promise;
+        const paramsByMethod: Record<string, Record<string, unknown>> = {
+          createSession: { name: "Blocked", mode: "assistant", permissionMode: "default" },
+          renameSession: { sessionId: session.id, name: "Blocked" },
+          deleteSession: { sessionId: session.id },
+          restoreCheckpoint: { sessionId: session.id, checkpointId: "blocked" }
+        };
+        try {
+          await expect(
+            getHandler(handlers, method)(paramsByMethod[method]!, () => undefined)
+          ).rejects.toThrow("Hay un prompt activo");
+        } finally {
+          finishRun.resolve();
+          await prompt;
+        }
+      } finally {
+        await rm(workspacePath, { recursive: true, force: true });
+      }
+    }
+  );
+
   it("rejects workspace initialization during a prompt and releases the guard afterwards", async () => {
     const firstWorkspace = await mkdtemp(join(tmpdir(), "agentev4-active-prompt-a-"));
     const secondWorkspace = await mkdtemp(join(tmpdir(), "agentev4-active-prompt-b-"));

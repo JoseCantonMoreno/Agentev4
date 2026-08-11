@@ -88,7 +88,7 @@ function StateSetup({
         type: "NOTIFICATION_SET",
         notification: { id: "saved", kind: "success", message: notification }
       });
-    if (sending) dispatch({ type: "SENDING_SET", sending: true });
+    if (sending) dispatch({ type: "SENDING_STARTED", runId: "workspace-flow" });
   }, [dispatch, error, followUp, notification, ready, sending, status, withoutSession]);
 
   return null;

@@ -43,7 +43,7 @@ export function SessionPanel() {
   async function handleSelect(sessionId: string) {
     if (state.sending) return;
     await activateSession(sessionId, dispatch);
-    const list = await callServer<string[]>("listCheckpoints", { sessionId });
+    const list = await callServer("listCheckpoints", { sessionId });
     setCheckpoints(list);
   }
 

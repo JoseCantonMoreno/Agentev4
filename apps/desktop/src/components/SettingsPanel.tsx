@@ -52,7 +52,7 @@ export function SettingsPanel() {
   useEffect(() => {
     if (!state.settingsOpen) return;
     const requestId = ++hasKeyRequest.current;
-    callServer<{ hasKey: boolean }>("hasApiKey", { provider: draft.provider })
+    callServer("hasApiKey", { provider: draft.provider })
       .then((result) => {
         if (requestId === hasKeyRequest.current) setHasKey(result.hasKey);
       })
@@ -75,7 +75,7 @@ export function SettingsPanel() {
     setSaving(true);
     dispatch({ type: "ERROR_SET", error: null });
     try {
-      const result = await callServer<SavedProviderSettings>("saveProviderSettings", {
+      const result: SavedProviderSettings = await callServer("saveProviderSettings", {
         provider: draft.provider,
         model,
         baseUrl: draft.baseUrl.trim(),

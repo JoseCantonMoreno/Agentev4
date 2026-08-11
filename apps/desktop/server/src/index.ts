@@ -211,6 +211,7 @@ export const handlers: Record<string, Handler> = {
     requireSessionManager().listMessages(cast<{ sessionId: string }>(p).sessionId),
   listTools: async () => Object.keys(createStaticToolRegistry()),
   createSession: async (p) => {
+    assertNoActivePrompts();
     const { name, mode, permissionMode } = cast<{
       name: string;
       mode: AgentMode;
@@ -224,16 +225,19 @@ export const handlers: Record<string, Handler> = {
     });
   },
   renameSession: async (p) => {
+    assertNoActivePrompts();
     const { sessionId, name } = cast<{ sessionId: string; name: string }>(p);
     return requireSessionManager().renameSession(sessionId, name);
   },
   deleteSession: async (p) => {
+    assertNoActivePrompts();
     requireSessionManager().deleteSession(cast<{ sessionId: string }>(p).sessionId);
     return { ok: true };
   },
   listCheckpoints: async (p) =>
     requireSessionManager().listCheckpoints(cast<{ sessionId: string }>(p).sessionId),
   restoreCheckpoint: async (p) => {
+    assertNoActivePrompts();
     const { sessionId, checkpointId } = cast<{ sessionId: string; checkpointId: string }>(p);
     return requireSessionManager().restoreCheckpoint(sessionId, checkpointId);
   },

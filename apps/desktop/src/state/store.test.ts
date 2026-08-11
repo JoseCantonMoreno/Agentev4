@@ -23,6 +23,54 @@ const ready: ReadyWorkspace = {
 };
 
 describe("workspace lifecycle reducer", () => {
+  it("correlates prompt completion so an older run cannot release the current run", () => {
+    const first = reducer(initialState, { type: "SENDING_STARTED", runId: "run-1" });
+    const crashed = reducer(first, {
+      type: "SERVER_PROCESS_FAILED",
+      error: "El servidor del agente se cerr\u00f3"
+    });
+    const restarted = reducer(crashed, { type: "SENDING_STARTED", runId: "run-2" });
+
+    const lateFinish = reducer(restarted, { type: "SENDING_FINISHED", runId: "run-1" });
+
+    expect(lateFinish.sending).toBe(true);
+    expect(lateFinish.activeRunId).toBe("run-2");
+  });
+
+  it("invalidates all process-owned state after a confirmed crash and can restart cleanly", () => {
+    let active = reducer(initialState, { type: "WORKSPACE_READY", ready });
+    active = reducer(active, {
+      type: "PROVIDER_CONFIG_COMMITTED",
+      config: { provider: "openai", model: "gpt-5", baseUrl: "" }
+    });
+    active = reducer(active, { type: "SENDING_STARTED", runId: "run-before-crash" });
+
+    const crashed = reducer(active, {
+      type: "SERVER_PROCESS_FAILED",
+      error: "El servidor del agente se cerr\u00f3"
+    });
+
+    expect(crashed).toMatchObject({
+      workspacePath: null,
+      workspaceStatus: "idle",
+      sessions: [],
+      activeSessionId: null,
+      messages: [],
+      thoughts: [],
+      toolCalls: [],
+      context: null,
+      pendingPermission: null,
+      sending: false,
+      activeRunId: null,
+      error: "El servidor del agente se cerr\u00f3",
+      providerConfig: initialState.providerConfig
+    });
+
+    const restarted = reducer(crashed, { type: "WORKSPACE_READY", ready });
+    expect(restarted.workspaceStatus).toBe("ready");
+    expect(restarted.activeSessionId).toBe("previous-session");
+  });
+
   it("discards a late message refresh for a session that is no longer active", () => {
     const active = reducer(initialState, { type: "WORKSPACE_READY", ready });
     const switched = reducer(active, {
@@ -48,8 +96,8 @@ describe("workspace lifecycle reducer", () => {
 
   it("refuses workspace and session navigation while a prompt is active", () => {
     const sending = reducer(reducer(initialState, { type: "WORKSPACE_READY", ready }), {
-      type: "SENDING_SET",
-      sending: true
+      type: "SENDING_STARTED",
+      runId: "run-1"
     });
     const navigationActions = [
       { type: "WORKSPACE_SELECTION_STARTED" as const },

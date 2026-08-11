@@ -68,7 +68,7 @@ export async function prepareWorkspace(input: {
   call?: typeof callServer;
 }): Promise<ReadyWorkspace> {
   const call = input.call ?? callServer;
-  const ready = await call<unknown>("initWorkspace", {
+  const ready = await call("initWorkspace", {
     workspacePath: input.workspacePath,
     defaultMode: input.defaultMode,
     defaultPermissionMode: input.defaultPermissionMode
@@ -79,7 +79,7 @@ export async function prepareWorkspace(input: {
 export async function listWorkspaceSessions(
   call: typeof callServer = callServer
 ): Promise<SessionConfig[]> {
-  return SessionConfigSchema.array().parse(await call<unknown>("listSessions"));
+  return SessionConfigSchema.array().parse(await call("listSessions"));
 }
 
 export async function createWorkspaceSession(
@@ -90,14 +90,14 @@ export async function createWorkspaceSession(
   },
   call: typeof callServer = callServer
 ): Promise<SessionConfig> {
-  return SessionConfigSchema.parse(await call<unknown>("createSession", input));
+  return SessionConfigSchema.parse(await call("createSession", input));
 }
 
 export async function listSessionMessages(
   sessionId: string,
   call: typeof callServer = callServer
 ): Promise<AgentMessage[]> {
-  return AgentMessageSchema.array().parse(await call<unknown>("listMessages", { sessionId }));
+  return AgentMessageSchema.array().parse(await call("listMessages", { sessionId }));
 }
 
 export function createWorkspaceSelectionController(input: {
