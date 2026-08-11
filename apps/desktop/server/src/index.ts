@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { InitWorkspaceInputSchema } from "@agentev4/shared";
 import type {
   AgentIpcEvent,
   AgentInterface,
   AgentMode,
+  InitWorkspaceInput,
   LlmProviderConfig,
   LlmProviderName,
   PermissionMode,
@@ -39,11 +41,23 @@ interface ServerState extends WorkspaceState {
 
 const state: ServerState = { keyStore: new KeyStore(), pendingPermissions: new Map() };
 const activePrompts = new Set<string>();
+let workspaceTransitionInProgress = false;
 
 function assertNoActivePrompts(): void {
   if (activePrompts.size > 0) {
     throw new Error("Hay un prompt activo; espera a que termine antes de cambiar de workspace.");
   }
+}
+
+function assertNoWorkspaceTransition(): void {
+  if (workspaceTransitionInProgress) {
+    throw new Error("Hay un cambio de workspace en curso; espera a que termine.");
+  }
+}
+
+function assertSessionMutationAllowed(): void {
+  assertNoWorkspaceTransition();
+  assertNoActivePrompts();
 }
 
 function requireSessionManager(): SessionManager {
@@ -58,18 +72,21 @@ function requireWorkspacePath(): string {
   return state.workspacePath;
 }
 
-async function initWorkspace(params: {
-  workspacePath: unknown;
-  defaultMode: AgentMode;
-  defaultPermissionMode: PermissionMode;
-}) {
+async function initWorkspace(input: Record<string, unknown> | undefined) {
+  const params: InitWorkspaceInput = InitWorkspaceInputSchema.parse(input);
   assertNoActivePrompts();
-  return switchWorkspace(state, params.workspacePath, {
-    defaultMode: params.defaultMode,
-    defaultPermissionMode: params.defaultPermissionMode,
-    listTools: () => Object.keys(createStaticToolRegistry()),
-    beforeCommit: assertNoActivePrompts
-  });
+  assertNoWorkspaceTransition();
+  workspaceTransitionInProgress = true;
+  try {
+    return await switchWorkspace(state, params.workspacePath, {
+      defaultMode: params.defaultMode,
+      defaultPermissionMode: params.defaultPermissionMode,
+      listTools: () => Object.keys(createStaticToolRegistry()),
+      beforeCommit: assertNoActivePrompts
+    });
+  } finally {
+    workspaceTransitionInProgress = false;
+  }
 }
 
 /** Envuelve el `AgentInterface` resiliente para emitir `agent:thought` en cada turno LLM. */
@@ -183,6 +200,7 @@ async function sendPrompt(
   },
   emit: (event: AgentIpcEvent) => void
 ) {
+  assertNoWorkspaceTransition();
   if (activePrompts.has(params.sessionId)) {
     throw new Error(`La sesión "${params.sessionId}" ya tiene un prompt activo.`);
   }
@@ -205,13 +223,13 @@ function cast<T>(params: Record<string, unknown> | undefined): T {
 }
 
 export const handlers: Record<string, Handler> = {
-  initWorkspace: (p) => initWorkspace(cast(p)),
+  initWorkspace: (p) => initWorkspace(p),
   listSessions: async () => requireSessionManager().listSessions(),
   listMessages: async (p) =>
     requireSessionManager().listMessages(cast<{ sessionId: string }>(p).sessionId),
   listTools: async () => Object.keys(createStaticToolRegistry()),
   createSession: async (p) => {
-    assertNoActivePrompts();
+    assertSessionMutationAllowed();
     const { name, mode, permissionMode } = cast<{
       name: string;
       mode: AgentMode;
@@ -225,19 +243,19 @@ export const handlers: Record<string, Handler> = {
     });
   },
   renameSession: async (p) => {
-    assertNoActivePrompts();
+    assertSessionMutationAllowed();
     const { sessionId, name } = cast<{ sessionId: string; name: string }>(p);
     return requireSessionManager().renameSession(sessionId, name);
   },
   deleteSession: async (p) => {
-    assertNoActivePrompts();
+    assertSessionMutationAllowed();
     requireSessionManager().deleteSession(cast<{ sessionId: string }>(p).sessionId);
     return { ok: true };
   },
   listCheckpoints: async (p) =>
     requireSessionManager().listCheckpoints(cast<{ sessionId: string }>(p).sessionId),
   restoreCheckpoint: async (p) => {
-    assertNoActivePrompts();
+    assertSessionMutationAllowed();
     const { sessionId, checkpointId } = cast<{ sessionId: string; checkpointId: string }>(p);
     return requireSessionManager().restoreCheckpoint(sessionId, checkpointId);
   },

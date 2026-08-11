@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -175,6 +175,108 @@ async function createSession(handlers: Record<string, unknown>, workspacePath: s
 }
 
 describe("saveProviderSettings", () => {
+  it.each([
+    { defaultMode: "unattended", defaultPermissionMode: "default" },
+    { defaultMode: "agent", defaultPermissionMode: "unrestricted" }
+  ])(
+    "rejects invalid initWorkspace input before touching disk: $defaultMode/$defaultPermissionMode",
+    async (invalid) => {
+      const workspacePath = await mkdtemp(join(tmpdir(), "agentev4-invalid-init-"));
+      try {
+        const handlers = await loadHandlers();
+
+        await expect(
+          getHandler(handlers, "initWorkspace")({ workspacePath, ...invalid }, () => undefined)
+        ).rejects.toThrow();
+        await expect(access(join(workspacePath, ".agente"))).rejects.toMatchObject({
+          code: "ENOENT"
+        });
+      } finally {
+        await rm(workspacePath, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([
+    "initWorkspace",
+    "createSession",
+    "renameSession",
+    "deleteSession",
+    "restoreCheckpoint",
+    "sendPrompt"
+  ])(
+    "rejects concurrent session mutation %s while workspace initialization is in progress",
+    async (method) => {
+      const firstWorkspace = await mkdtemp(join(tmpdir(), "agentev4-transition-a-"));
+      const secondWorkspace = await mkdtemp(join(tmpdir(), "agentev4-transition-b-"));
+      try {
+        const handlers = await loadHandlers();
+        const session = await createSession(handlers, firstWorkspace);
+        const transition = getHandler(handlers, "initWorkspace")(
+          {
+            workspacePath: secondWorkspace,
+            defaultMode: "assistant",
+            defaultPermissionMode: "default"
+          },
+          () => undefined
+        );
+        const paramsByMethod: Record<string, Record<string, unknown>> = {
+          initWorkspace: {
+            workspacePath: firstWorkspace,
+            defaultMode: "assistant",
+            defaultPermissionMode: "default"
+          },
+          createSession: { name: "Blocked", mode: "assistant", permissionMode: "default" },
+          renameSession: { sessionId: session.id, name: "Blocked" },
+          deleteSession: { sessionId: session.id },
+          restoreCheckpoint: { sessionId: session.id, checkpointId: "blocked" },
+          sendPrompt: { sessionId: session.id, prompt: "Blocked" }
+        };
+
+        await expect(
+          getHandler(handlers, method)(paramsByMethod[method]!, () => undefined)
+        ).rejects.toThrow("cambio de workspace en curso");
+        await expect(transition).resolves.toMatchObject({ workspacePath: secondWorkspace });
+      } finally {
+        await Promise.all([
+          rm(firstWorkspace, { recursive: true, force: true }),
+          rm(secondWorkspace, { recursive: true, force: true })
+        ]);
+      }
+    }
+  );
+
+  it("releases the workspace transition guard when initialization fails", async () => {
+    const validWorkspace = await mkdtemp(join(tmpdir(), "agentev4-transition-retry-"));
+    const missingWorkspace = join(validWorkspace, "missing");
+    try {
+      const handlers = await loadHandlers();
+
+      await expect(
+        getHandler(handlers, "initWorkspace")(
+          {
+            workspacePath: missingWorkspace,
+            defaultMode: "assistant",
+            defaultPermissionMode: "default"
+          },
+          () => undefined
+        )
+      ).rejects.toThrow();
+      await expect(
+        getHandler(handlers, "initWorkspace")(
+          {
+            workspacePath: validWorkspace,
+            defaultMode: "assistant",
+            defaultPermissionMode: "default"
+          },
+          () => undefined
+        )
+      ).resolves.toMatchObject({ workspacePath: validWorkspace });
+    } finally {
+      await rm(validWorkspace, { recursive: true, force: true });
+    }
+  });
+
   it.each(["createSession", "renameSession", "deleteSession", "restoreCheckpoint"])(
     "rejects workspace/session mutation %s while any prompt is active",
     async (method) => {

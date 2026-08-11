@@ -11,24 +11,30 @@ import { useAppState } from "../state/store";
 
 async function activateSession(
   sessionId: string,
+  workspacePath: string,
   dispatch: ReturnType<typeof useAppState>["dispatch"]
 ) {
   const messages = await listSessionMessages(sessionId);
-  dispatch({ type: "SESSION_ACTIVATED", sessionId, messages });
+  dispatch({ type: "SESSION_ACTIVATED", workspacePath, sessionId, messages });
 }
 
 export function SessionPanel() {
   const { state, dispatch } = useAppState();
   const [newName, setNewName] = useState("");
   const [checkpoints, setCheckpoints] = useState<string[]>([]);
+  const sessionControlsDisabled =
+    state.sending || state.workspaceStatus === "selecting" || state.workspaceStatus === "preparing";
 
   async function refreshSessions() {
+    const workspacePath = state.workspacePath;
+    if (!workspacePath || sessionControlsDisabled) return;
     const sessions = await listWorkspaceSessions();
-    dispatch({ type: "SESSIONS_SET", sessions });
+    dispatch({ type: "SESSIONS_SET", workspacePath, sessions });
   }
 
   async function handleCreate() {
-    if (state.sending) return;
+    if (sessionControlsDisabled || !state.workspacePath) return;
+    const workspacePath = state.workspacePath;
     const name = newName.trim() || `Sesión ${state.sessions.length + 1}`;
     const created = await createWorkspaceSession({
       name,
@@ -37,18 +43,19 @@ export function SessionPanel() {
     });
     setNewName("");
     await refreshSessions();
-    await activateSession(created.id, dispatch);
+    await activateSession(created.id, workspacePath, dispatch);
   }
 
   async function handleSelect(sessionId: string) {
-    if (state.sending) return;
-    await activateSession(sessionId, dispatch);
+    if (sessionControlsDisabled || !state.workspacePath) return;
+    const workspacePath = state.workspacePath;
+    await activateSession(sessionId, workspacePath, dispatch);
     const list = await callServer("listCheckpoints", { sessionId });
     setCheckpoints(list);
   }
 
   async function handleRename(session: SessionConfig) {
-    if (state.sending) return;
+    if (sessionControlsDisabled) return;
     const name = window.prompt("Nuevo nombre de la sesión", session.name);
     if (!name || name === session.name) return;
     await callServer("renameSession", { sessionId: session.id, name });
@@ -56,12 +63,13 @@ export function SessionPanel() {
   }
 
   async function handleDelete(session: SessionConfig) {
-    if (state.sending) return;
+    if (sessionControlsDisabled || !state.workspacePath) return;
+    const workspacePath = state.workspacePath;
     if (!window.confirm(`¿Eliminar la sesión "${session.name}"? Esta acción no se puede deshacer.`))
       return;
     await callServer("deleteSession", { sessionId: session.id });
     if (state.activeSessionId === session.id)
-      dispatch({ type: "SESSION_ACTIVATED", sessionId: null, messages: [] });
+      dispatch({ type: "SESSION_ACTIVATED", workspacePath, sessionId: null, messages: [] });
     await refreshSessions();
   }
 
@@ -72,7 +80,7 @@ export function SessionPanel() {
       <div className="flex gap-2">
         <input
           value={newName}
-          disabled={state.sending}
+          disabled={sessionControlsDisabled}
           onChange={(event) => setNewName(event.target.value)}
           placeholder="Nombre de la nueva sesión"
           className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
@@ -80,7 +88,7 @@ export function SessionPanel() {
         <button
           type="button"
           onClick={() => void handleCreate()}
-          disabled={state.sending}
+          disabled={sessionControlsDisabled}
           className="flex items-center gap-1 rounded-md bg-emerald-700 px-2 py-1 text-sm hover:bg-emerald-600"
         >
           <Plus size={14} /> Nueva
@@ -100,7 +108,7 @@ export function SessionPanel() {
             <button
               type="button"
               onClick={() => void handleSelect(session.id)}
-              disabled={state.sending}
+              disabled={sessionControlsDisabled}
               className="block w-full text-left disabled:opacity-50"
             >
               <div className="truncate font-medium">{session.name}</div>
@@ -112,7 +120,7 @@ export function SessionPanel() {
               <button
                 type="button"
                 onClick={() => void handleRename(session)}
-                disabled={state.sending}
+                disabled={sessionControlsDisabled}
                 title="Renombrar"
                 className="hover:text-neutral-100 disabled:opacity-50"
               >
@@ -121,7 +129,7 @@ export function SessionPanel() {
               <button
                 type="button"
                 onClick={() => void handleDelete(session)}
-                disabled={state.sending}
+                disabled={sessionControlsDisabled}
                 title="Eliminar"
                 className="hover:text-red-400 disabled:opacity-50"
               >

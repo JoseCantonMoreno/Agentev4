@@ -70,10 +70,16 @@ function StateSetup({
   const { dispatch } = useAppState();
 
   useEffect(() => {
+    if (ready) dispatch({ type: "WORKSPACE_READY", ready });
     if (status === "selecting") dispatch({ type: "WORKSPACE_SELECTION_STARTED" });
     if (status === "preparing") dispatch({ type: "WORKSPACE_PREPARING" });
-    if (ready) dispatch({ type: "WORKSPACE_READY", ready });
-    if (withoutSession) dispatch({ type: "SESSION_ACTIVATED", sessionId: null, messages: [] });
+    if (withoutSession)
+      dispatch({
+        type: "SESSION_ACTIVATED",
+        workspacePath: ready?.workspacePath ?? "C:\\repo",
+        sessionId: null,
+        messages: []
+      });
     if (followUp === "cancelled") {
       dispatch({ type: "WORKSPACE_SELECTION_STARTED" });
       dispatch({ type: "WORKSPACE_SELECTION_CANCELLED" });
@@ -143,6 +149,28 @@ describe("workspace-to-chat flow", () => {
 
     for (const control of controls) expect(control).toHaveProperty("disabled", true);
   });
+
+  it.each(["selecting", "preparing"] as const)(
+    "blocks every session control while a workspace is %s",
+    (status) => {
+      render(
+        <AppStateProvider>
+          <StateSetup ready={readyWorkspaceFixture()} status={status} />
+          <WorkspaceSelector />
+          <SessionPanel />
+        </AppStateProvider>
+      );
+
+      const controls = [
+        screen.getByPlaceholderText("Nombre de la nueva sesi\u00f3n"),
+        screen.getByRole("button", { name: "Nueva" }),
+        screen.getByRole("button", { name: /Sesi\u00f3n de prueba/ }),
+        screen.getByRole("button", { name: "Renombrar" }),
+        screen.getByRole("button", { name: "Eliminar" })
+      ];
+      for (const control of controls) expect(control).toHaveProperty("disabled", true);
+    }
+  );
 
   it("explains that a workspace must be selected before chat is available", () => {
     render(
@@ -339,7 +367,12 @@ describe("workspace and notification state", () => {
     (type) => {
       const sessionlessWorkspace = reducer(
         reducer(initialState, { type: "WORKSPACE_READY", ready: readyWorkspaceFixture() }),
-        { type: "SESSION_ACTIVATED", sessionId: null, messages: [] }
+        {
+          type: "SESSION_ACTIVATED",
+          workspacePath: "C:\\repo",
+          sessionId: null,
+          messages: []
+        }
       );
       const pending = reducer(sessionlessWorkspace, {
         type:

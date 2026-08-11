@@ -33,6 +33,10 @@ interface PendingRequest {
   timeout: ReturnType<typeof setTimeout> | undefined;
 }
 
+const MAX_IGNORABLE_TIMEOUT_IDS = 256;
+const INVALID_PROTOCOL_MESSAGE =
+  "El servidor del agente envi\u00f3 una respuesta RPC inv\u00e1lida";
+
 function toError(value: unknown, fallback: string): Error {
   if (value instanceof Error) return value;
   if (typeof value === "string" && value.length > 0) return new Error(value);
@@ -43,6 +47,7 @@ export class RpcClient {
   private readonly pending = new Map<number, PendingRequest>();
   private readonly listeners = new Set<EventListener>();
   private readonly lifecycleListeners = new Set<LifecycleListener>();
+  private readonly timedOutIds = new Set<number>();
   private nextId = 1;
   private buffer = "";
   private process: RpcWritableProcess | undefined;
@@ -139,6 +144,7 @@ export class RpcClient {
               const request = this.pending.get(id);
               if (!request) return;
               this.pending.delete(id);
+              this.rememberTimedOutId(id);
               request.reject(new Error("Tiempo de espera agotado"));
             }, timeoutMs);
 
@@ -166,18 +172,20 @@ export class RpcClient {
     while (lineEnd >= 0) {
       const line = this.buffer.slice(0, lineEnd);
       this.buffer = this.buffer.slice(lineEnd + 1);
-      this.handleLine(line);
+      this.handleLine(generation, line);
+      if (this.generation !== generation) return;
       lineEnd = this.buffer.indexOf("\n");
     }
   }
 
-  private handleLine(line: string): void {
+  private handleLine(generation: number, line: string): void {
     if (line.trim().length === 0) return;
 
     let payload: unknown;
     try {
       payload = JSON.parse(line);
     } catch {
+      this.failProtocol(generation);
       return;
     }
 
@@ -189,22 +197,36 @@ export class RpcClient {
     ) {
       const event = AgentIpcEventSchema.safeParse(payload);
       if (!event.success) {
-        this.emitLifecycle({
-          type: "protocol:error",
-          message: "El servidor del agente envi\u00f3 un evento inv\u00e1lido"
-        });
+        this.failProtocol(generation);
         return;
       }
       for (const listener of this.listeners) listener(event.data);
       return;
     }
 
-    if (typeof payload !== "object" || payload === null) return;
+    if (typeof payload !== "object" || payload === null) {
+      this.failProtocol(generation);
+      return;
+    }
     const response = payload as { id?: unknown; result?: unknown; error?: unknown };
-    if (typeof response.id !== "number") return;
+    const hasResult = Object.prototype.hasOwnProperty.call(response, "result");
+    const hasError = Object.prototype.hasOwnProperty.call(response, "error");
+    if (
+      typeof response.id !== "number" ||
+      !Number.isSafeInteger(response.id) ||
+      response.id <= 0 ||
+      hasResult === hasError
+    ) {
+      this.failProtocol(generation);
+      return;
+    }
 
     const request = this.pending.get(response.id);
-    if (!request) return;
+    if (!request) {
+      if (this.timedOutIds.delete(response.id)) return;
+      this.failProtocol(generation);
+      return;
+    }
 
     this.pending.delete(response.id);
     if (request.timeout) clearTimeout(request.timeout);
@@ -215,6 +237,22 @@ export class RpcClient {
     request.resolve(response.result);
   }
 
+  private rememberTimedOutId(id: number): void {
+    this.timedOutIds.add(id);
+    if (this.timedOutIds.size <= MAX_IGNORABLE_TIMEOUT_IDS) return;
+    const oldestId = this.timedOutIds.values().next().value as number | undefined;
+    if (oldestId !== undefined) this.timedOutIds.delete(oldestId);
+  }
+
+  private failProtocol(generation: number): void {
+    this.emitLifecycle({ type: "protocol:error", message: INVALID_PROTOCOL_MESSAGE });
+    this.stop(
+      generation,
+      new Error("El servidor del agente envi\u00f3 un protocolo RPC inv\u00e1lido"),
+      "El servidor del agente se detuvo por un error de protocolo"
+    );
+  }
+
   private stop(generation: number, error: Error, lifecycleMessage: string): void {
     if (this.generation !== generation) return;
 
@@ -223,6 +261,7 @@ export class RpcClient {
     this.processGeneration = 0;
     this.startPromise = undefined;
     this.buffer = "";
+    this.timedOutIds.clear();
     this.emitLifecycle({ type: "process:stopped", message: lifecycleMessage });
     for (const request of this.pending.values()) {
       if (request.timeout) clearTimeout(request.timeout);

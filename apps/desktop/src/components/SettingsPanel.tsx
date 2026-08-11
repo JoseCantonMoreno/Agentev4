@@ -34,6 +34,11 @@ interface ProviderDraft {
   apiKey: string;
 }
 
+interface PreservedApiKey {
+  provider: LlmProviderName;
+  value: string;
+}
+
 export function SettingsPanel() {
   const { state, dispatch } = useAppState();
   const [draft, setDraft] = useState<ProviderDraft>({ ...state.providerConfig, apiKey: "" });
@@ -42,7 +47,7 @@ export function SettingsPanel() {
   const hasKeyRequest = useRef(0);
   const savingRef = useRef(false);
   const observedServerEpoch = useRef(state.serverEpoch);
-  const apiKeyDraftRef = useRef("");
+  const apiKeyDraftRef = useRef<PreservedApiKey | null>(null);
 
   useEffect(() => {
     if (!state.settingsOpen) {
@@ -51,7 +56,7 @@ export function SettingsPanel() {
     }
     const serverChanged = observedServerEpoch.current !== state.serverEpoch;
     observedServerEpoch.current = state.serverEpoch;
-    if (!serverChanged) apiKeyDraftRef.current = "";
+    if (!serverChanged) apiKeyDraftRef.current = null;
     hasKeyRequest.current += 1;
     setHasKey(false);
     setDraft({ ...state.providerConfig, apiKey: "" });
@@ -79,7 +84,10 @@ export function SettingsPanel() {
       return;
     }
 
-    const apiKey = apiKeyDraftRef.current.trim();
+    const apiKey =
+      apiKeyDraftRef.current?.provider === draft.provider
+        ? apiKeyDraftRef.current.value.trim()
+        : "";
     savingRef.current = true;
     setSaving(true);
     dispatch({ type: "ERROR_SET", error: null });
@@ -96,7 +104,7 @@ export function SettingsPanel() {
         config: committedConfig
       });
       hasKeyRequest.current += 1;
-      apiKeyDraftRef.current = "";
+      apiKeyDraftRef.current = null;
       setDraft({ ...committedConfig, apiKey: "" });
       setHasKey(result.hasApiKey);
       dispatch({
@@ -121,16 +129,25 @@ export function SettingsPanel() {
   function handleProviderChange(provider: LlmProviderName) {
     hasKeyRequest.current += 1;
     setHasKey(false);
+    if (apiKeyDraftRef.current?.provider !== provider) apiKeyDraftRef.current = null;
     setDraft((current) => ({ ...current, provider }));
   }
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/50">
-      <div className="flex h-full w-96 flex-col gap-5 overflow-y-auto border-l border-neutral-800 bg-neutral-950 p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        className="flex h-full w-96 flex-col gap-5 overflow-y-auto border-l border-neutral-800 bg-neutral-950 p-4"
+      >
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Ajustes</h2>
+          <h2 id="settings-title" className="text-lg font-semibold">
+            Ajustes
+          </h2>
           <button
             type="button"
+            aria-label="Cerrar ajustes"
             onClick={() => dispatch({ type: "SETTINGS_TOGGLE" })}
             className="text-neutral-400 hover:text-neutral-100"
           >
@@ -190,7 +207,10 @@ export function SettingsPanel() {
               type="password"
               value={draft.apiKey}
               onChange={(event) => {
-                apiKeyDraftRef.current = event.target.value;
+                apiKeyDraftRef.current = {
+                  provider: draft.provider,
+                  value: event.target.value
+                };
                 setDraft((current) => ({ ...current, apiKey: event.target.value }));
               }}
               disabled={saving}

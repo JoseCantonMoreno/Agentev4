@@ -54,13 +54,9 @@ function ensureSession(
 
 export async function switchWorkspace(
   state: WorkspaceState,
-  rawPath: unknown,
+  rawPath: string,
   preparation: WorkspacePreparation
 ): Promise<ReadyWorkspace> {
-  if (typeof rawPath !== "string" || rawPath.trim() === "") {
-    throw new Error("La ruta del workspace es obligatoria.");
-  }
-
   const workspacePath = resolve(rawPath);
   const info = await stat(workspacePath);
   if (!info.isDirectory()) throw new Error(`La ruta "${workspacePath}" no es una carpeta.`);

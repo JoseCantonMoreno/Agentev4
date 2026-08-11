@@ -90,13 +90,11 @@ describe("RpcClient", () => {
     factory.stdout(
       '{"type":"agent:thought","sessionId":"session-1","apiKey":"secret-not-observable"}\n'
     );
-    factory.stdout('{"id":1,"result":null}\n');
-
-    await expect(pending).resolves.toBeNull();
+    await expect(pending).rejects.toThrow("protocolo RPC inv\u00e1lido");
     expect(eventListener).not.toHaveBeenCalled();
     expect(lifecycleListener).toHaveBeenCalledWith({
       type: "protocol:error",
-      message: "El servidor del agente envi\u00f3 un evento inv\u00e1lido"
+      message: "El servidor del agente envi\u00f3 una respuesta RPC inv\u00e1lida"
     });
     expect(JSON.stringify(lifecycleListener.mock.calls)).not.toContain("secret-not-observable");
   });
@@ -209,6 +207,54 @@ describe("RpcClient", () => {
 
     await timedOut;
     factory.stdout('{"id":1,"result":"late"}\n');
+
+    const next = client.call<string>("next");
+    await Promise.resolve();
+    factory.stdout('{"id":2,"result":"still-running"}\n');
+    await expect(next).resolves.toBe("still-running");
+  });
+
+  it.each([
+    ["invalid JSON", "not-json\n"],
+    ["an envelope without an id", '{"result":"orphan"}\n'],
+    ["an unknown response id", '{"id":99,"result":"orphan"}\n']
+  ])("stops and rejects a non-expiring mutation after %s", async (_case, line) => {
+    const factory = new FakeProcessFactory();
+    const client = new RpcClient(factory, 1_000);
+    const lifecycleListener = vi.fn();
+    client.subscribeLifecycle(lifecycleListener);
+    const pending = client.call(
+      "saveProviderSettings",
+      { apiKey: "secret-not-observable" },
+      { timeoutMs: false }
+    );
+    const rejected = expect(pending).rejects.toThrow("protocolo RPC inv\u00e1lido");
+    await factory.started();
+
+    factory.stdout(line);
+
+    await rejected;
+    expect(lifecycleListener).toHaveBeenCalledWith({
+      type: "protocol:error",
+      message: "El servidor del agente envi\u00f3 una respuesta RPC inv\u00e1lida"
+    });
+    expect(JSON.stringify(lifecycleListener.mock.calls)).not.toContain("secret-not-observable");
+  });
+
+  it("treats a duplicate response id as a protocol failure and rejects other pending work", async () => {
+    const factory = new FakeProcessFactory();
+    const client = new RpcClient(factory, 1_000);
+    const first = client.call<string>("first");
+    await factory.started();
+    factory.stdout('{"id":1,"result":"done"}\n');
+    await expect(first).resolves.toBe("done");
+    const second = client.call("second", undefined, { timeoutMs: false });
+    const rejected = expect(second).rejects.toThrow("protocolo RPC inv\u00e1lido");
+    await Promise.resolve();
+
+    factory.stdout('{"id":1,"result":"duplicate"}\n');
+
+    await rejected;
   });
 
   it("rejects pending requests after a failed write and starts cleanly on the next call", async () => {

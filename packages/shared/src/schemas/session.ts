@@ -27,3 +27,10 @@ export const SessionConfigSchema = z.object({
   updatedAt: z.coerce.date()
 });
 export type SessionConfig = z.infer<typeof SessionConfigSchema>;
+
+export const InitWorkspaceInputSchema = z.object({
+  workspacePath: z.string().trim().min(1),
+  defaultMode: AgentModeSchema,
+  defaultPermissionMode: PermissionModeSchema
+});
+export type InitWorkspaceInput = z.infer<typeof InitWorkspaceInputSchema>;

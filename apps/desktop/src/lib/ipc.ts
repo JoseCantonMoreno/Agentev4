@@ -123,7 +123,7 @@ function parseSavedProviderSettings(value: unknown): unknown {
   return SavedProviderSettingsSchema.parse(value);
 }
 
-const RESULT_VALIDATORS: Record<string, Validator> = {
+const responseValidators = {
   initWorkspace: parseReadyWorkspace,
   listSessions: (value) => SessionConfigSchema.array().parse(value),
   listMessages: (value) => AgentMessageSchema.array().parse(value),
@@ -138,7 +138,7 @@ const RESULT_VALIDATORS: Record<string, Validator> = {
   saveProviderSettings: parseSavedProviderSettings,
   respondPermission: parseOk,
   sendPrompt: parsePromptResult
-};
+} satisfies Record<RpcMethod, Validator>;
 
 export function rpcPolicyForMethod(method: string): Required<RpcCallOptions> {
   return { timeoutMs: NON_EXPIRING_METHODS.has(method) ? false : READ_TIMEOUT_MS };
@@ -153,10 +153,10 @@ function containsApiKey(value: unknown): boolean {
 }
 
 export function validateRpcResult<M extends RpcMethod>(method: M, value: unknown): RpcResultMap[M] {
-  const validator = RESULT_VALIDATORS[method];
+  const validator = responseValidators[method];
   try {
     if (containsApiKey(value)) throw new Error();
-    return validator!(value) as RpcResultMap[M];
+    return validator(value) as RpcResultMap[M];
   } catch {
     throw new Error(`Respuesta RPC inv\u00e1lida para ${method}`);
   }

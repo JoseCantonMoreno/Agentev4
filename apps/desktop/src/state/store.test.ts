@@ -75,6 +75,7 @@ describe("workspace lifecycle reducer", () => {
     const active = reducer(initialState, { type: "WORKSPACE_READY", ready });
     const switched = reducer(active, {
       type: "SESSION_ACTIVATED",
+      workspacePath: "C:\\previous",
       sessionId: "current-session",
       messages: []
     });
@@ -103,11 +104,44 @@ describe("workspace lifecycle reducer", () => {
       { type: "WORKSPACE_SELECTION_STARTED" as const },
       { type: "WORKSPACE_PREPARING" as const },
       { type: "WORKSPACE_READY" as const, ready: { ...ready, workspacePath: "C:\\other" } },
-      { type: "SESSIONS_SET" as const, sessions: [] },
-      { type: "SESSION_ACTIVATED" as const, sessionId: "other", messages: [] }
+      { type: "SESSIONS_SET" as const, workspacePath: "C:\\previous", sessions: [] },
+      {
+        type: "SESSION_ACTIVATED" as const,
+        workspacePath: "C:\\previous",
+        sessionId: "other",
+        messages: []
+      }
     ];
 
     for (const action of navigationActions) expect(reducer(sending, action)).toBe(sending);
+  });
+
+  it("ignores session responses from workspace A during and after a transition to B", () => {
+    const activeA = reducer(initialState, { type: "WORKSPACE_READY", ready });
+    const preparingB = reducer(activeA, { type: "WORKSPACE_PREPARING" });
+    const duringTransition = reducer(preparingB, {
+      type: "SESSION_ACTIVATED",
+      workspacePath: "C:\\previous",
+      sessionId: "late-a",
+      messages: []
+    });
+    const readyB = reducer(preparingB, {
+      type: "WORKSPACE_READY",
+      ready: {
+        ...ready,
+        workspacePath: "C:\\next",
+        sessions: [{ ...ready.sessions[0]!, id: "next-session", workspacePath: "C:\\next" }],
+        activeSessionId: "next-session"
+      }
+    });
+    const afterTransition = reducer(readyB, {
+      type: "SESSIONS_SET",
+      workspacePath: "C:\\previous",
+      sessions: []
+    });
+
+    expect(duringTransition).toBe(preparingB);
+    expect(afterTransition).toBe(readyB);
   });
 
   it("preserves the active workspace when folder selection is cancelled", () => {

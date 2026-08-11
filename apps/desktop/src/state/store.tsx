@@ -50,8 +50,13 @@ export interface AppState {
 
 export type Action =
   | WorkspaceLifecycleAction
-  | { type: "SESSIONS_SET"; sessions: SessionConfig[] }
-  | { type: "SESSION_ACTIVATED"; sessionId: string | null; messages: AgentMessage[] }
+  | { type: "SESSIONS_SET"; workspacePath: string; sessions: SessionConfig[] }
+  | {
+      type: "SESSION_ACTIVATED";
+      workspacePath: string;
+      sessionId: string | null;
+      messages: AgentMessage[];
+    }
   | { type: "MESSAGES_SET"; sessionId: string; messages: AgentMessage[] }
   | { type: "SENDING_STARTED"; runId: string }
   | { type: "SENDING_FINISHED"; runId: string }
@@ -131,10 +136,20 @@ export function reducer(state: AppState, action: Action): AppState {
         error: action.error
       };
     case "SESSIONS_SET":
-      if (state.sending) return state;
+      if (
+        state.sending ||
+        state.workspaceStatus !== "ready" ||
+        action.workspacePath !== state.workspacePath
+      )
+        return state;
       return { ...state, sessions: action.sessions };
     case "SESSION_ACTIVATED":
-      if (state.sending) return state;
+      if (
+        state.sending ||
+        state.workspaceStatus !== "ready" ||
+        action.workspacePath !== state.workspacePath
+      )
+        return state;
       return {
         ...state,
         activeSessionId: action.sessionId,

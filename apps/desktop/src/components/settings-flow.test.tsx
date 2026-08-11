@@ -67,6 +67,58 @@ afterEach(() => {
 });
 
 describe("provider settings save flow", () => {
+  it("never sends a preserved OpenAI key when Anthropic is saved after a crash", async () => {
+    let saveCount = 0;
+    vi.mocked(callServer).mockImplementation(async (method) => {
+      if (method === "hasApiKey") return { hasKey: false };
+      if (method === "saveProviderSettings") {
+        saveCount += 1;
+        return saveCount === 1
+          ? { config: { provider: "openai", model: "gpt-5" }, hasApiKey: true }
+          : { config: { provider: "anthropic", model: "claude-sonnet-5" }, hasApiKey: true };
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    const user = userEvent.setup();
+    const openAiSecret = "sk-openai-must-not-cross-provider";
+
+    render(<SettingsHarness />);
+    await user.selectOptions(screen.getByLabelText("Proveedor"), "openai");
+    await user.clear(screen.getByLabelText("Modelo"));
+    await user.type(screen.getByLabelText("Modelo"), "gpt-5");
+    await user.type(screen.getByLabelText("API key"), openAiSecret);
+    await user.click(screen.getByRole("button", { name: "Guardar configuraci\u00f3n" }));
+    await screen.findByRole("status");
+    await user.type(screen.getByLabelText("API key"), openAiSecret);
+
+    act(() => {
+      serverLifecycle.listener?.({
+        type: "process:stopped",
+        message: "El servidor del agente se cerr\u00f3"
+      });
+    });
+    await waitFor(() =>
+      expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe("anthropic")
+    );
+    await user.click(screen.getByRole("button", { name: "Guardar configuraci\u00f3n" }));
+
+    expect(
+      vi.mocked(callServer).mock.calls.filter(([method]) => method === "saveProviderSettings")[1]
+    ).toEqual([
+      "saveProviderSettings",
+      { provider: "anthropic", model: "claude-sonnet-5", baseUrl: "" }
+    ]);
+  });
+
+  it("exposes the settings drawer as a labelled modal dialog with a named close button", async () => {
+    vi.mocked(callServer).mockResolvedValue({ hasKey: false });
+    render(<SettingsHarness />);
+
+    const dialog = await screen.findByRole("dialog", { name: "Ajustes" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(screen.getByRole("button", { name: "Cerrar ajustes" })).not.toBeNull();
+  });
+
   it("resets an open panel on crash, ignores stale key state, and retries with the local key", async () => {
     const pendingHasKey: Array<{
       provider: string;
