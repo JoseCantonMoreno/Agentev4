@@ -130,7 +130,7 @@ export function SettingsPanel() {
     hasKeyRequest.current += 1;
     setHasKey(false);
     if (apiKeyDraftRef.current?.provider !== provider) apiKeyDraftRef.current = null;
-    setDraft((current) => ({ ...current, provider }));
+    setDraft((current) => ({ ...current, provider, apiKey: "" }));
   }
 
   return (

@@ -345,8 +345,12 @@ describe("provider settings save flow", () => {
       );
     });
 
+    const anthropicSecret = "sk-anthropic-must-disappear";
+    await user.type(screen.getByLabelText("API key"), anthropicSecret);
     await user.selectOptions(screen.getByLabelText("Proveedor"), "openai");
     expect((screen.getByLabelText("API key") as HTMLInputElement).placeholder).toBe("API key");
+    expect((screen.getByLabelText("API key") as HTMLInputElement).value).toBe("");
+    expect(document.body.innerHTML).not.toContain(anthropicSecret);
     await waitFor(() => expect(hasKeyResolvers.has("openai")).toBe(true));
     await user.selectOptions(screen.getByLabelText("Proveedor"), "gemini");
     await waitFor(() => expect(hasKeyResolvers.has("gemini")).toBe(true));
