@@ -18,13 +18,32 @@ apps/desktop/src-tauri/gen/
 
 # Logs y entornos locales
 *.log
+logs/
 .env
 .env.local
+.env.*
+!.env.example
 
 # Workspace runtime del agente (creado por la app, no versionado).
 # Excepción: rules.md sí se versiona -- son las reglas reales del proyecto (Fase 13).
 .agente/*
 !.agente/rules.md
+
+# Claves de proveedor LLM persistidas por KeyStore.persistToDisk (Fase 10):
+# nunca deben subirse independientemente de en qué ruta las escriba quien llama.
+*.keystore
+*.key.json
+keys.json
+
+# Bases de datos sueltas fuera de .agente/ (sessions.db vive en .agente/, ya cubierto arriba)
+*.db
+*.sqlite
+*.sqlite3
+
+# Basura del SO
+Thumbs.db
+desktop.ini
+.DS_Store
 
 # Configuración local de Claude Code (launch.json de preview, etc.)
 .claude/
