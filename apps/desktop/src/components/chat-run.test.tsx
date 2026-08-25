@@ -4,18 +4,20 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AgentIpcEvent } from "@agentev4/shared";
 import type { ReadyWorkspace } from "../lib/workspace";
 import { AppStateProvider, useAppState } from "../state/store";
 import { ChatPanel } from "./ChatPanel";
 
-const { callServer, listSessionMessages } = vi.hoisted(() => ({
+const { callServer, listSessionMessages, onServerEvent } = vi.hoisted(() => ({
   callServer: vi.fn(),
-  listSessionMessages: vi.fn()
+  listSessionMessages: vi.fn(),
+  onServerEvent: vi.fn()
 }));
 
 vi.mock("../lib/ipc", () => ({
   callServer,
-  onServerEvent: () => () => undefined,
+  onServerEvent,
   onServerLifecycle: () => () => undefined
 }));
 vi.mock("../lib/workspace", async (importOriginal) => ({
@@ -92,5 +94,43 @@ describe("chat run lifecycle", () => {
     await act(async () => vi.advanceTimersByTimeAsync(31_000));
 
     expect(screen.getByRole("button", { name: /Enviando/ })).toHaveProperty("disabled", true);
+  });
+
+  it("renders the assistant turn and tool calls live as server events arrive, before the RPC resolves", async () => {
+    let emitEvent: ((event: AgentIpcEvent) => void) | undefined;
+    onServerEvent.mockImplementation((listener: (event: AgentIpcEvent) => void) => {
+      emitEvent = listener;
+      return () => undefined;
+    });
+    callServer.mockImplementation(() => new Promise(() => undefined));
+    const user = userEvent.setup();
+    render(
+      <AppStateProvider>
+        <ReadyState />
+        <ChatPanel />
+      </AppStateProvider>
+    );
+    await user.type(screen.getByRole("textbox"), "revisa el repo");
+    act(() => screen.getByRole("button", { name: "Enviar" }).click());
+
+    expect(screen.getByText("Pensando…")).toBeDefined();
+
+    act(() =>
+      emitEvent?.({
+        type: "agent:tool_call",
+        sessionId: "session-1",
+        toolCall: { id: "call-1", name: "FileSystem_Read", input: {} }
+      })
+    );
+    expect(screen.getByText("FileSystem_Read")).toBeDefined();
+
+    act(() =>
+      emitEvent?.({
+        type: "agent:thought",
+        sessionId: "session-1",
+        content: "He revisado el repo y todo compila."
+      })
+    );
+    expect(screen.getByText("He revisado el repo y todo compila.")).toBeDefined();
   });
 });

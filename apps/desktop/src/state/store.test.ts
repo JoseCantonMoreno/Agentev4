@@ -56,8 +56,7 @@ describe("workspace lifecycle reducer", () => {
       sessions: [],
       activeSessionId: null,
       messages: [],
-      thoughts: [],
-      toolCalls: [],
+      activity: [],
       context: null,
       pendingPermission: null,
       sending: false,
@@ -166,5 +165,58 @@ describe("workspace lifecycle reducer", () => {
     expect(failed.workspacePath).toBe("C:\\previous");
     expect(failed.sessions).toEqual(ready.sessions);
     expect(failed.error).toBe("init failed");
+  });
+
+  it("interleaves thoughts and tool calls in a single chronological activity log", () => {
+    const active = reducer(initialState, { type: "WORKSPACE_READY", ready });
+    const afterThought = reducer(active, {
+      type: "SERVER_EVENT",
+      event: {
+        type: "agent:thought",
+        sessionId: "previous-session",
+        content: "Voy a mirar el repo"
+      }
+    });
+    const afterToolCall = reducer(afterThought, {
+      type: "SERVER_EVENT",
+      event: {
+        type: "agent:tool_call",
+        sessionId: "previous-session",
+        toolCall: { id: "call-1", name: "FileSystem_Read", input: {} }
+      }
+    });
+
+    expect(afterToolCall.activity).toEqual([
+      { kind: "thought", content: "Voy a mirar el repo" },
+      { kind: "tool_call", toolCall: { id: "call-1", name: "FileSystem_Read", input: {} } }
+    ]);
+  });
+
+  it("clears the in-progress activity log when a new prompt starts", () => {
+    const active = reducer(initialState, { type: "WORKSPACE_READY", ready });
+    const withActivity = reducer(active, {
+      type: "SERVER_EVENT",
+      event: { type: "agent:thought", sessionId: "previous-session", content: "..." }
+    });
+
+    const started = reducer(withActivity, { type: "SENDING_STARTED", runId: "run-1" });
+
+    expect(started.activity).toEqual([]);
+  });
+
+  it("clears the in-progress activity log once the authoritative message refetch lands", () => {
+    const active = reducer(initialState, { type: "WORKSPACE_READY", ready });
+    const withActivity = reducer(active, {
+      type: "SERVER_EVENT",
+      event: { type: "agent:thought", sessionId: "previous-session", content: "..." }
+    });
+
+    const reconciled = reducer(withActivity, {
+      type: "MESSAGES_SET",
+      sessionId: "previous-session",
+      messages: []
+    });
+
+    expect(reconciled.activity).toEqual([]);
   });
 });

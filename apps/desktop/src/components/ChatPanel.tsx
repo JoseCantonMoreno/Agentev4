@@ -84,16 +84,37 @@ export function ChatPanel() {
           </article>
         ))}
 
-        {state.toolCalls.map((event) => (
-          <div key={event.toolCall.id} className="flex items-center gap-2 text-xs text-amber-400">
-            <Wrench size={12} />
-            <span className="font-mono">{event.toolCall.name}</span>
-          </div>
-        ))}
+        {/*
+         * Registro en vivo del turno en curso, intercalado en el orden real
+         * de llegada (pensamientos y tool calls comparten el mismo array,
+         * ver ActivityEntry en store.tsx). Se sustituye por completo cuando
+         * llega el refetch autoritativo de la sesión.
+         */}
+        {state.activity.map((entry, index) =>
+          entry.kind === "thought" ? (
+            <article key={`activity-${index}`} className="text-sm text-neutral-300">
+              <span className="mr-2 font-semibold uppercase text-neutral-500">assistant</span>
+              <span className="whitespace-pre-wrap">{entry.content}</span>
+            </article>
+          ) : (
+            <div
+              key={`activity-${index}`}
+              className="flex items-center gap-2 text-xs text-amber-400"
+            >
+              <Wrench size={12} />
+              <span className="font-mono">{entry.toolCall.name}</span>
+            </div>
+          )
+        )}
 
-        {state.thoughts.length > 0 && (
-          <div className="rounded-md border border-neutral-800 bg-neutral-950 p-2 text-xs text-neutral-500">
-            {state.thoughts.at(-1)}
+        {state.sending && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="flex items-center gap-2 text-xs text-neutral-500"
+          >
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-neutral-500" />
+            Pensando…
           </div>
         )}
       </div>
