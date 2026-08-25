@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Agent } from "@mastra/core/agent";
+import { createTool, type Tool } from "@mastra/core/tools";
 import type { ModelMessage } from "ai";
 import type {
   AgentFactory,
@@ -8,9 +9,31 @@ import type {
   AgentRunInput,
   AgentRunResult,
   LlmProviderConfig,
-  StopReason
+  StopReason,
+  ToolDeclaration
 } from "@agentev4/shared";
 import { resolveLanguageModel } from "./providers.js";
+
+/**
+ * Traduce `ToolDeclaration[]` (Fase 1, agnóstico de Mastra) a `Tool`s de
+ * Mastra para que el LLM las vea al llamar `agent.generate()`. Deliberadamente
+ * sin `execute`: con `maxSteps: 1` el `Agent` nunca correría la tool él mismo,
+ * y si en el futuro se sube `maxSteps`, un `execute` aquí la ejecutaría por
+ * duplicado junto al orquestador externo (`agent-loop.ts`), que es quien debe
+ * seguir controlando permisos y ejecución real de principio a fin.
+ */
+export function toMastraTools(declarations: ToolDeclaration[]): Record<string, Tool> {
+  return Object.fromEntries(
+    declarations.map((declaration) => [
+      declaration.name,
+      createTool({
+        id: declaration.name,
+        description: declaration.description,
+        inputSchema: declaration.inputSchema
+      })
+    ])
+  );
+}
 
 function toModelMessages(messages: AgentMessage[]): ModelMessage[] {
   return messages.map((message): ModelMessage => {
@@ -46,12 +69,13 @@ function toStopReason(finishReason: string | undefined): StopReason {
 export class MastraAgentAdapter implements AgentInterface {
   private readonly agent: Agent;
 
-  constructor(config: LlmProviderConfig) {
+  constructor(config: LlmProviderConfig, tools: ToolDeclaration[] = []) {
     this.agent = new Agent({
       id: `agentev4-${config.provider}`,
       name: `Agentev4 (${config.provider})`,
       instructions: "You are Agentev4, an autonomous coding agent.",
-      model: resolveLanguageModel(config)
+      model: resolveLanguageModel(config),
+      tools: toMastraTools(tools)
     });
   }
 
@@ -88,8 +112,8 @@ export class MastraAgentAdapter implements AgentInterface {
 
 export function createMastraAgentFactory(): AgentFactory {
   return {
-    create(config: LlmProviderConfig): AgentInterface {
-      return new MastraAgentAdapter(config);
+    create(config: LlmProviderConfig, tools: ToolDeclaration[] = []): AgentInterface {
+      return new MastraAgentAdapter(config, tools);
     }
   };
 }

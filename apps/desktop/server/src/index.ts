@@ -22,7 +22,8 @@ import {
   createResilientAgent,
   runAgenticLoop
 } from "@agentev4/core";
-import { createStaticToolRegistry, executeRegisteredTool } from "@agentev4/tools";
+import { createStaticToolRegistry, executeRegisteredTool, toToolDeclarations, type McpConnection, type ToolRegistry } from "@agentev4/tools";
+import { closeMcpConnections, connectConfiguredMcpServers } from "./mcp-tools.js";
 import { saveProviderSettings } from "./provider-settings.js";
 import { encodeLine, isRpcRequest, parseLines, type RpcRequest } from "./protocol.js";
 import { switchWorkspace, type WorkspaceState } from "./workspace.js";
@@ -37,9 +38,16 @@ interface ServerState extends WorkspaceState {
   providerSettings?: SavedProviderSettings["config"];
   readonly keyStore: KeyStore;
   readonly pendingPermissions: Map<string, (decision: PermissionDecision) => void>;
+  toolRegistry: ToolRegistry;
+  mcpConnections: McpConnection[];
 }
 
-const state: ServerState = { keyStore: new KeyStore(), pendingPermissions: new Map() };
+const state: ServerState = {
+  keyStore: new KeyStore(),
+  pendingPermissions: new Map(),
+  toolRegistry: createStaticToolRegistry(),
+  mcpConnections: []
+};
 const activePrompts = new Set<string>();
 let workspaceTransitionInProgress = false;
 
@@ -78,12 +86,23 @@ async function initWorkspace(input: Record<string, unknown> | undefined) {
   assertNoWorkspaceTransition();
   workspaceTransitionInProgress = true;
   try {
-    return await switchWorkspace(state, params.workspacePath, {
+    const ready = await switchWorkspace(state, params.workspacePath, {
       defaultMode: params.defaultMode,
       defaultPermissionMode: params.defaultPermissionMode,
       listTools: () => Object.keys(createStaticToolRegistry()),
       beforeCommit: assertNoActivePrompts
     });
+
+    // Las tools MCP se conectan tras confirmar el workspace (necesitan
+    // `.agente/mcp.json` ya resuelto) y se cierran las del workspace
+    // anterior para no dejar procesos hijo huérfanos.
+    const previousMcpConnections = state.mcpConnections;
+    const { registry, connections } = await connectConfiguredMcpServers(ready.workspacePath);
+    await closeMcpConnections(previousMcpConnections);
+    state.toolRegistry = registry;
+    state.mcpConnections = connections;
+
+    return { ...ready, tools: Object.keys(registry) };
   } finally {
     workspaceTransitionInProgress = false;
   }
@@ -136,8 +155,12 @@ async function executePrompt(
     ...config,
     apiKey: state.keyStore.get(config.provider)
   };
+  const registry = state.toolRegistry;
   const agent = withThoughtEvents(
-    createResilientAgent(createMastraAgentFactory().create(providerConfig), undefined),
+    createResilientAgent(
+      createMastraAgentFactory().create(providerConfig, toToolDeclarations(registry)),
+      undefined
+    ),
     params.sessionId,
     emit
   );
@@ -147,7 +170,6 @@ async function executePrompt(
     canUseTool: bridgedCanUseTool(params.sessionId, emit),
     rules: { deny: params.disabledTools ?? [] }
   });
-  const registry = createStaticToolRegistry();
   const executeTool = async (call: ToolCall) => {
     const decision = await permissionEngine.evaluate(call);
     if (decision.behavior === "deny") {
@@ -227,7 +249,7 @@ export const handlers: Record<string, Handler> = {
   listSessions: async () => requireSessionManager().listSessions(),
   listMessages: async (p) =>
     requireSessionManager().listMessages(cast<{ sessionId: string }>(p).sessionId),
-  listTools: async () => Object.keys(createStaticToolRegistry()),
+  listTools: async () => Object.keys(state.toolRegistry),
   createSession: async (p) => {
     assertSessionMutationAllowed();
     const { name, mode, permissionMode } = cast<{
@@ -320,4 +342,6 @@ process.stdin.on("data", (chunk: string) => {
     if (isRpcRequest(message)) void dispatch(message);
   }
 });
-process.stdin.on("end", () => process.exit(0));
+process.stdin.on("end", () => {
+  void closeMcpConnections(state.mcpConnections).finally(() => process.exit(0));
+});

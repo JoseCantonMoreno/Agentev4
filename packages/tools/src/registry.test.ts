@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineTool, executeRegisteredTool, type ToolRegistry } from "./registry.js";
+import { defineTool, executeRegisteredTool, toToolDeclarations, type ToolRegistry } from "./registry.js";
 
 const registry: ToolRegistry = {
   Boom: defineTool({
@@ -48,5 +48,24 @@ describe("executeRegisteredTool", () => {
 
     expect(result.isError).toBe(false);
     expect(result.output).toBe(42);
+  });
+});
+
+describe("toToolDeclarations", () => {
+  it("convierte cada tool del registro a {name, description, inputSchema}, sin exponer el handler", () => {
+    const declarations = toToolDeclarations(registry);
+
+    expect(declarations).toHaveLength(2);
+    const double = declarations.find((declaration) => declaration.name === "Double");
+    expect(double).toEqual({
+      name: "Double",
+      description: "Tool de prueba que duplica un número.",
+      inputSchema: registry.Double!.inputSchema
+    });
+    expect(double).not.toHaveProperty("handler");
+  });
+
+  it("un registro vacío produce un array vacío", () => {
+    expect(toToolDeclarations({})).toEqual([]);
   });
 });

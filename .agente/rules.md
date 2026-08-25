@@ -33,6 +33,29 @@ host ni en el contenedor persistente del `Dockerfile` raíz (ese es solo para
 red saliente a APIs de LLM/scraping). Sin Docker corriendo, esas tools y sus
 tests fallan — es un requisito duro del entorno, no opcional.
 
+## Tools ante el LLM y MCP
+
+El registro de tools (`ToolRegistry`, nativo + MCP) se traduce a
+`ToolDeclaration[]` vía `toToolDeclarations()`
+(`packages/tools/src/registry.ts`) y se pasa a `AgentFactory.create(config,
+tools)`. `MastraAgentAdapter` (`packages/core/src/mastra-agent.ts`) las
+declara al `Agent` de Mastra vía `toMastraTools()`, deliberadamente **sin**
+`execute`: con el modelo sabiendo que las tools existen pero sin poder
+ejecutarlas él mismo, la ejecución real sigue pasando siempre por el
+orquestador externo (`agent-loop.ts` -> motor de permisos -> `executeRegisteredTool`),
+nunca por dentro de Mastra.
+
+MCP está conectado de punta a punta: al hacer `initWorkspace`,
+`connectConfiguredMcpServers()` (`apps/desktop/server/src/mcp-tools.ts`)
+detecta `.agente/mcp.json` en el workspace del usuario, conecta cada servidor
+vía `loadMcpConnections` (stdio real) y fusiona sus tools
+(`createMcpToolRegistry`, nombradas `${servidor}__${tool}`) con el registro
+estático en `state.toolRegistry`. Sin `mcp.json`, o si un servidor no
+arranca, degrada a solo tools nativas con aviso en stderr — nunca tumba el
+arranque del workspace. Las conexiones del workspace anterior se cierran al
+cambiar de workspace y al terminar el proceso (`closeMcpConnections`), mismo
+criterio que Docker efímero: ningún proceso hijo sobrevive al padre.
+
 ## Claves de proveedor LLM
 
 En RAM por defecto (`packages/core/src/security/key-store.ts`), nunca en el

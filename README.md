@@ -11,7 +11,12 @@ Repo inicializado con flujo obligatorio de pull request en `main` (ver
 
 ## Requisitos previos
 
-- Node.js >= 20 y `pnpm` (`corepack enable` si no está activo).
+- Node.js >= 22 y `pnpm` (`corepack enable` si no está activo). `better-sqlite3`
+  (dependencia nativa de `packages/core`) exige Node >= 22 desde su versión
+  13 — con Node 20 el addon compilado no carga (`NODE_MODULE_VERSION`
+  distinto) o directamente crashea el proceso. Si usas `fnm`/`nvm`/`volta`,
+  el `.node-version` de la raíz selecciona la versión correcta al entrar al
+  repo.
 - [Docker](https://www.docker.com/) corriendo — las tools de shell del agente
   se ejecutan en contenedores efímeros, no en el host.
 - Toolchain de Rust ([rustup](https://rustup.rs/)) para compilar el shell de

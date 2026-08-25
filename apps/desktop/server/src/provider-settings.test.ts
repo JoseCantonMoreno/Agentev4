@@ -142,7 +142,15 @@ function mockServerDependencies(): void {
 
   vi.doMock("@agentev4/tools", () => ({
     createStaticToolRegistry: () => ({}),
-    executeRegisteredTool: vi.fn()
+    executeRegisteredTool: vi.fn(),
+    toToolDeclarations: () => [],
+    // Ruta real (join simple), para que connectConfiguredMcpServers detecte
+    // que no hay .agente/mcp.json en el workspace temporal del test y nunca
+    // llegue a invocar loadMcpConnections/createMcpToolRegistry de verdad.
+    mcpConfigPath: (workspacePath: string) => join(workspacePath, ".agente", "mcp.json"),
+    loadMcpConnections: vi.fn(),
+    createMcpToolRegistry: vi.fn(),
+    closeMcpConnections: vi.fn(async () => undefined)
   }));
 }
 
