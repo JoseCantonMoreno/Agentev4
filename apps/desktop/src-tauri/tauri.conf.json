@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "identifier": "com.agentev4.desktop",
   "build": {
-    "beforeDevCommand": "pnpm run predev",
+    "beforeDevCommand": "pnpm run predev && pnpm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm run build",
     "frontendDist": "../dist"

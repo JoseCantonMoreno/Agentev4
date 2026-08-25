@@ -1,4 +1,4 @@
-import type { ToolCall, ToolResult } from "@agentev4/shared";
+import type { ToolCall, ToolDeclaration, ToolResult } from "@agentev4/shared";
 import type { z } from "zod";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- ver ponytail más abajo
@@ -60,4 +60,18 @@ export async function executeRegisteredTool(registry: ToolRegistry, call: ToolCa
   } catch (error) {
     return { toolCallId: call.id, output: error instanceof Error ? error.message : String(error), isError: true };
   }
+}
+
+/**
+ * Proyecta un `ToolRegistry` (nativo, MCP, o cualquier mezcla) al contrato
+ * agnóstico `ToolDeclaration[]` de la Fase 1, para pasarlo a `AgentFactory.create`.
+ * Deliberadamente omite `handler`/`outputSchema`: el LLM solo necesita saber
+ * nombre + descripción + forma del input, nunca cómo se ejecuta la tool.
+ */
+export function toToolDeclarations(registry: ToolRegistry): ToolDeclaration[] {
+  return Object.values(registry).map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema
+  }));
 }
