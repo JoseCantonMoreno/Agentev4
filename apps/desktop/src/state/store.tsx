@@ -27,12 +27,18 @@ export interface AppNotification {
 
 /**
  * Registro cronológico único de lo que el agente va haciendo durante un
- * turno en curso (pensamientos + tool calls intercalados en el orden real
- * de llegada). Vive solo mientras `sending` es true: se limpia al empezar
- * un prompt nuevo y al llegar el refetch autoritativo de `state.messages`.
+ * turno en curso (texto del asistente + tool calls intercalados en el
+ * orden real de llegada). Vive solo mientras `sending` es true: se limpia
+ * al empezar un prompt nuevo y al llegar el refetch autoritativo de
+ * `state.messages`.
+ *
+ * `assistant_delta` acumula fragmentos consecutivos con el mismo
+ * `messageId` en una sola burbuja creciente; un `messageId` distinto abre
+ * una entrada nueva (turno siguiente, o reintento tras un fallo transitorio
+ * -- ver `AgentMessageDeltaEvent`).
  */
 export type ActivityEntry =
-  | { kind: "thought"; content: string }
+  | { kind: "assistant_delta"; messageId: string; content: string }
   | { kind: "tool_call"; toolCall: ToolCall };
 
 export interface AppState {
@@ -227,11 +233,25 @@ export function reducer(state: AppState, action: Action): AppState {
       const { event } = action;
       if (event.sessionId !== state.activeSessionId) return state;
       switch (event.type) {
-        case "agent:thought":
+        case "agent:message_delta": {
+          const last = state.activity.at(-1);
+          if (last?.kind === "assistant_delta" && last.messageId === event.messageId) {
+            return {
+              ...state,
+              activity: [
+                ...state.activity.slice(0, -1),
+                { ...last, content: last.content + event.delta }
+              ]
+            };
+          }
           return {
             ...state,
-            activity: [...state.activity, { kind: "thought", content: event.content }]
+            activity: [
+              ...state.activity,
+              { kind: "assistant_delta", messageId: event.messageId, content: event.delta }
+            ]
           };
+        }
         case "agent:tool_call":
           return {
             ...state,

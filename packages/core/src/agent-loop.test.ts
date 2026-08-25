@@ -136,4 +136,29 @@ describe("runAgenticLoop", () => {
     expect(result.turnsUsed).toBe(2);
     expect(result.costUsd).toBeCloseTo(1.2);
   });
+
+  it("forwards onDelta to the agent so streaming progress reaches the caller", async () => {
+    const deltas: Array<[string, string]> = [];
+    const agent: AgentInterface = {
+      async run(input) {
+        input.onDelta?.("hola ", "msg-1");
+        input.onDelta?.("mundo", "msg-1");
+        return { message: assistantMessage("hola mundo"), toolCalls: [], stopReason: "end_turn", costUsd: 0 };
+      },
+      async submitToolResult(): Promise<void> {}
+    };
+
+    await runAgenticLoop({
+      agent,
+      mode: "assistant",
+      messages: baseMessages(),
+      governance: baseGovernance(),
+      onDelta: (delta, messageId) => deltas.push([delta, messageId])
+    });
+
+    expect(deltas).toEqual([
+      ["hola ", "msg-1"],
+      ["mundo", "msg-1"]
+    ]);
+  });
 });

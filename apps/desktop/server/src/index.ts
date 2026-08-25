@@ -108,16 +108,37 @@ async function initWorkspace(input: Record<string, unknown> | undefined) {
   }
 }
 
-/** Envuelve el `AgentInterface` resiliente para emitir `agent:thought` en cada turno LLM. */
-function withThoughtEvents(
+/**
+ * Envuelve el `AgentInterface` resiliente para emitir `agent:context_update`
+ * al terminar cada turno LLM (antes se calculaba una sola vez, al final de
+ * todo el bucle multi-turno, así que el gauge de contexto no se movía
+ * durante la ejecución). No toca `input.onDelta`: el streaming token a
+ * token lo cablea directamente `runAgenticLoop` vía `AgentLoopParams.onDelta`.
+ */
+function withContextUpdateEvents(
   agent: AgentInterface,
   sessionId: string,
+  registry: ToolRegistry,
   emit: (event: AgentIpcEvent) => void
 ): AgentInterface {
   return {
     async run(input) {
       const result = await agent.run(input);
-      emit({ type: "agent:thought", sessionId, content: result.message.content });
+
+      const breakdown = countContextTokens({
+        systemPrompt: SYSTEM_PROMPT,
+        rules: "",
+        tools: Object.keys(registry).join(","),
+        messages: [...input.messages, result.message]
+      });
+      emit({
+        type: "agent:context_update",
+        sessionId,
+        usedTokens: breakdown.total,
+        maxTokens: MAX_CONTEXT_TOKENS,
+        breakdown
+      });
+
       return result;
     },
     submitToolResult: (result) => agent.submitToolResult(result)
@@ -156,12 +177,13 @@ async function executePrompt(
     apiKey: state.keyStore.get(config.provider)
   };
   const registry = state.toolRegistry;
-  const agent = withThoughtEvents(
+  const agent = withContextUpdateEvents(
     createResilientAgent(
       createMastraAgentFactory().create(providerConfig, toToolDeclarations(registry)),
       undefined
     ),
     params.sessionId,
+    registry,
     emit
   );
 
@@ -190,26 +212,14 @@ async function executePrompt(
     mode: session.mode,
     messages: priorMessages,
     governance: DEFAULT_GOVERNANCE,
-    executeTool
+    executeTool,
+    onDelta: (delta, messageId) =>
+      emit({ type: "agent:message_delta", sessionId: params.sessionId, messageId, delta })
   });
 
   for (const message of result.messages.slice(priorMessages.length)) {
     sessionManager.appendMessage(params.sessionId, message);
   }
-
-  const breakdown = countContextTokens({
-    systemPrompt: SYSTEM_PROMPT,
-    rules: "",
-    tools: Object.keys(registry).join(","),
-    messages: result.messages
-  });
-  emit({
-    type: "agent:context_update",
-    sessionId: params.sessionId,
-    usedTokens: breakdown.total,
-    maxTokens: MAX_CONTEXT_TOKENS,
-    breakdown
-  });
 
   return { haltReason: result.haltReason, turnsUsed: result.turnsUsed };
 }

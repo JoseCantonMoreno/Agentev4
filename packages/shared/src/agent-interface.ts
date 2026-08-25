@@ -19,6 +19,14 @@ export interface ToolDeclaration {
 export interface AgentRunInput {
   messages: AgentMessage[];
   governance: LoopGovernance;
+  /**
+   * Callback opcional invocado con cada fragmento de texto según el modelo
+   * lo va generando. `messageId` identifica el turno/intento (ver
+   * `AgentMessageDeltaEvent` en `@agentev4/shared`): un adaptador que
+   * reintenta genera uno nuevo por intento para que el consumidor pueda
+   * descartar limpiamente el texto parcial de un intento fallido.
+   */
+  onDelta?: (delta: string, messageId: string) => void;
 }
 
 export interface AgentRunResult {

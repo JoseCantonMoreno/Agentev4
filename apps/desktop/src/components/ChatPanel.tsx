@@ -91,7 +91,7 @@ export function ChatPanel() {
          * llega el refetch autoritativo de la sesión.
          */}
         {state.activity.map((entry, index) =>
-          entry.kind === "thought" ? (
+          entry.kind === "assistant_delta" ? (
             <article key={`activity-${index}`} className="text-sm text-neutral-300">
               <span className="mr-2 font-semibold uppercase text-neutral-500">assistant</span>
               <span className="whitespace-pre-wrap">{entry.content}</span>

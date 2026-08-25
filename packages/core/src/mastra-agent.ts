@@ -16,7 +16,7 @@ import { resolveLanguageModel } from "./providers.js";
 
 /**
  * Traduce `ToolDeclaration[]` (Fase 1, agnóstico de Mastra) a `Tool`s de
- * Mastra para que el LLM las vea al llamar `agent.generate()`. Deliberadamente
+ * Mastra para que el LLM las vea al llamar `agent.stream()`. Deliberadamente
  * sin `execute`: con `maxSteps: 1` el `Agent` nunca correría la tool él mismo,
  * y si en el futuro se sube `maxSteps`, un `execute` aquí la ejecutaría por
  * duplicado junto al orquestador externo (`agent-loop.ts`), que es quien debe
@@ -80,25 +80,38 @@ export class MastraAgentAdapter implements AgentInterface {
   }
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
-    const result = await this.agent.generate(toModelMessages(input.messages), {
+    const stream = await this.agent.stream(toModelMessages(input.messages), {
       maxSteps: 1
     });
+
+    // `stream.messageId` es propio de esta llamada a Mastra: un reintento
+    // (createResilientAgent) vuelve a invocar `run()` y produce uno nuevo,
+    // así que el consumidor de `onDelta` nunca mezcla texto de dos intentos.
+    for await (const delta of stream.textStream) {
+      input.onDelta?.(delta, stream.messageId);
+    }
+
+    const [text, toolCalls, finishReason] = await Promise.all([
+      stream.text,
+      stream.toolCalls,
+      stream.finishReason
+    ]);
 
     return {
       message: {
         id: randomUUID(),
         role: "assistant",
-        content: result.text,
+        content: text,
         createdAt: new Date()
       },
-      toolCalls: result.toolCalls.map((call) => ({
+      toolCalls: toolCalls.map((call) => ({
         id: call.payload.toolCallId,
         name: call.payload.toolName,
         input: (call.payload.args ?? {}) as Record<string, unknown>
       })),
-      stopReason: toStopReason(result.finishReason),
-      // ponytail: sin tabla de precios por modelo todavía; el coste real
-      // llega en Fase 10 (multiproveedor/resiliencia). El corte por
+      stopReason: toStopReason(finishReason),
+      // ponytail: sin tabla de precios por modelo todavía (llega en Fase 5,
+      // que ya podrá leer `stream.usage` aquí mismo). El corte por
       // max_budget_usd ya es testeable con un AgentInterface simulado.
       costUsd: 0
     };

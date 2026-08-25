@@ -126,9 +126,18 @@ describe("chat run lifecycle", () => {
 
     act(() =>
       emitEvent?.({
-        type: "agent:thought",
+        type: "agent:message_delta",
         sessionId: "session-1",
-        content: "He revisado el repo y todo compila."
+        messageId: "msg-1",
+        delta: "He revisado el repo "
+      })
+    );
+    act(() =>
+      emitEvent?.({
+        type: "agent:message_delta",
+        sessionId: "session-1",
+        messageId: "msg-1",
+        delta: "y todo compila."
       })
     );
     expect(screen.getByText("He revisado el repo y todo compila.")).toBeDefined();

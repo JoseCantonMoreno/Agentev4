@@ -98,4 +98,20 @@ describe("packages/shared schemas", () => {
     });
     expect(event.type).toBe("agent:permission_request");
   });
+
+  it("parses agent:message_delta (streaming token a token)", () => {
+    const event = AgentIpcEventSchema.parse({
+      type: "agent:message_delta",
+      sessionId: "s1",
+      messageId: "msg_1",
+      delta: "Hola"
+    });
+    expect(event.type).toBe("agent:message_delta");
+  });
+
+  it("rejects agent:message_delta sin messageId", () => {
+    expect(() =>
+      AgentIpcEventSchema.parse({ type: "agent:message_delta", sessionId: "s1", delta: "Hola" })
+    ).toThrow();
+  });
 });
