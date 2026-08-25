@@ -18,6 +18,10 @@ export interface AgentLoopParams {
   /** Ejecutor de tools inyectable; sin él (Fase 3/5 aún no listas) el bucle
    * se limita a exponer el tool_use pendiente al llamador. */
   executeTool?: (call: ToolCall) => Promise<ToolResult>;
+  /** Progreso incremental del turno en curso; ver `AgentRunInput.onDelta`. */
+  onDelta?: (delta: string, messageId: string) => void;
+  /** Ver `AgentRunInput.systemPrompt`; se reenvía tal cual a cada turno. */
+  systemPrompt?: string;
 }
 
 export interface AgentLoopResult {
@@ -44,7 +48,7 @@ export function toolResultMessage(result: ToolResult): AgentMessage {
  * "plan" se detienen tras el primer turno (solo lectura / respuesta directa).
  */
 export async function runAgenticLoop(params: AgentLoopParams): Promise<AgentLoopResult> {
-  const { agent, mode, governance, executeTool } = params;
+  const { agent, mode, governance, executeTool, onDelta, systemPrompt } = params;
   let messages = params.messages;
   let turnsUsed = 0;
   let costUsd = 0;
@@ -57,7 +61,12 @@ export async function runAgenticLoop(params: AgentLoopParams): Promise<AgentLoop
       return { messages, haltReason: "max_budget_usd", turnsUsed, costUsd };
     }
 
-    const result = await agent.run({ messages, governance });
+    const result = await agent.run({
+      messages,
+      governance,
+      ...(systemPrompt ? { systemPrompt } : {}),
+      ...(onDelta ? { onDelta } : {})
+    });
     turnsUsed += 1;
     costUsd += result.costUsd;
     messages = [...messages, result.message];

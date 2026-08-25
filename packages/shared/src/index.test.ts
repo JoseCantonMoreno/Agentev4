@@ -6,7 +6,8 @@ import {
   LlmProviderConfigSchema,
   InitWorkspaceInputSchema,
   SessionConfigSchema,
-  AgentIpcEventSchema
+  AgentIpcEventSchema,
+  AgentSettingsSchema
 } from "./index.js";
 
 describe("packages/shared schemas", () => {
@@ -97,5 +98,36 @@ describe("packages/shared schemas", () => {
       toolCall: { id: "call_1", name: "FileSystem_Write", input: { path: "a.txt" } }
     });
     expect(event.type).toBe("agent:permission_request");
+  });
+
+  it("parses agent:message_delta (streaming token a token)", () => {
+    const event = AgentIpcEventSchema.parse({
+      type: "agent:message_delta",
+      sessionId: "s1",
+      messageId: "msg_1",
+      delta: "Hola"
+    });
+    expect(event.type).toBe("agent:message_delta");
+  });
+
+  it("rejects agent:message_delta sin messageId", () => {
+    expect(() =>
+      AgentIpcEventSchema.parse({ type: "agent:message_delta", sessionId: "s1", delta: "Hola" })
+    ).toThrow();
+  });
+
+  it("parsea AgentSettings con override y sin él (Fase 2)", () => {
+    expect(AgentSettingsSchema.parse({})).toEqual({});
+    expect(AgentSettingsSchema.parse({ systemPromptOverride: "Sé breve." })).toEqual({
+      systemPromptOverride: "Sé breve."
+    });
+  });
+
+  it("AgentSettings descarta campos desconocidos como apiKey (nunca debe persistirse ahí)", () => {
+    const parsed = AgentSettingsSchema.parse({
+      systemPromptOverride: "ok",
+      apiKey: "sk-should-be-stripped"
+    });
+    expect(parsed).not.toHaveProperty("apiKey");
   });
 });

@@ -1,3 +1,4 @@
+export * from "./schemas/agent-settings.js";
 export * from "./schemas/messages.js";
 export * from "./schemas/tools.js";
 export * from "./schemas/provider.js";

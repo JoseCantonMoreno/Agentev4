@@ -5,6 +5,7 @@ import type {
   AgentMessage,
   AgentMode,
   AgentPermissionRequestEvent,
+  AgentSettings,
   LlmProviderName,
   PermissionMode,
   SessionConfig,
@@ -27,12 +28,18 @@ export interface AppNotification {
 
 /**
  * Registro cronológico único de lo que el agente va haciendo durante un
- * turno en curso (pensamientos + tool calls intercalados en el orden real
- * de llegada). Vive solo mientras `sending` es true: se limpia al empezar
- * un prompt nuevo y al llegar el refetch autoritativo de `state.messages`.
+ * turno en curso (texto del asistente + tool calls intercalados en el
+ * orden real de llegada). Vive solo mientras `sending` es true: se limpia
+ * al empezar un prompt nuevo y al llegar el refetch autoritativo de
+ * `state.messages`.
+ *
+ * `assistant_delta` acumula fragmentos consecutivos con el mismo
+ * `messageId` en una sola burbuja creciente; un `messageId` distinto abre
+ * una entrada nueva (turno siguiente, o reintento tras un fallo transitorio
+ * -- ver `AgentMessageDeltaEvent`).
  */
 export type ActivityEntry =
-  | { kind: "thought"; content: string }
+  | { kind: "assistant_delta"; messageId: string; content: string }
   | { kind: "tool_call"; toolCall: ToolCall };
 
 export interface AppState {
@@ -55,6 +62,7 @@ export interface AppState {
   disabledTools: Set<string>;
   defaultMode: AgentMode;
   defaultPermissionMode: PermissionMode;
+  agentSettings: AgentSettings;
 }
 
 export type Action =
@@ -78,6 +86,7 @@ export type Action =
   | { type: "SERVER_EVENT"; event: AgentIpcEvent }
   | { type: "PERMISSION_RESOLVED" }
   | { type: "PROVIDER_CONFIG_COMMITTED"; config: ProviderConfig }
+  | { type: "AGENT_SETTINGS_COMMITTED"; settings: AgentSettings }
   | { type: "TOOLS_SET"; tools: string[] }
   | { type: "TOOL_TOGGLED"; tool: string }
   | { type: "DEFAULTS_SET"; mode?: AgentMode; permissionMode?: PermissionMode };
@@ -101,7 +110,8 @@ export const initialState: AppState = {
   availableTools: [],
   disabledTools: new Set(),
   defaultMode: "agent",
-  defaultPermissionMode: "default"
+  defaultPermissionMode: "default",
+  agentSettings: {}
 };
 
 function hasLoadedWorkspace(state: AppState): boolean {
@@ -131,6 +141,7 @@ export function reducer(state: AppState, action: Action): AppState {
         activeSessionId: action.ready.activeSessionId,
         messages: action.ready.messages,
         availableTools: action.ready.tools,
+        agentSettings: action.ready.agentSettings,
         activity: [],
         context: null,
         pendingPermission: null,
@@ -191,6 +202,7 @@ export function reducer(state: AppState, action: Action): AppState {
         activeRunId: null,
         serverEpoch: state.serverEpoch + 1,
         providerConfig: initialState.providerConfig,
+        agentSettings: initialState.agentSettings,
         availableTools: [],
         disabledTools: new Set(),
         error: action.error
@@ -209,6 +221,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, pendingPermission: null };
     case "PROVIDER_CONFIG_COMMITTED":
       return { ...state, providerConfig: action.config };
+    case "AGENT_SETTINGS_COMMITTED":
+      return { ...state, agentSettings: action.settings };
     case "TOOLS_SET":
       return { ...state, availableTools: action.tools };
     case "TOOL_TOGGLED": {
@@ -227,11 +241,25 @@ export function reducer(state: AppState, action: Action): AppState {
       const { event } = action;
       if (event.sessionId !== state.activeSessionId) return state;
       switch (event.type) {
-        case "agent:thought":
+        case "agent:message_delta": {
+          const last = state.activity.at(-1);
+          if (last?.kind === "assistant_delta" && last.messageId === event.messageId) {
+            return {
+              ...state,
+              activity: [
+                ...state.activity.slice(0, -1),
+                { ...last, content: last.content + event.delta }
+              ]
+            };
+          }
           return {
             ...state,
-            activity: [...state.activity, { kind: "thought", content: event.content }]
+            activity: [
+              ...state.activity,
+              { kind: "assistant_delta", messageId: event.messageId, content: event.delta }
+            ]
           };
+        }
         case "agent:tool_call":
           return {
             ...state,

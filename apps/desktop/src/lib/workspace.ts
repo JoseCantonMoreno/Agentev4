@@ -1,8 +1,10 @@
 import {
   AgentMessageSchema,
+  AgentSettingsSchema,
   SessionConfigSchema,
   type AgentMessage,
   type AgentMode,
+  type AgentSettings,
   type PermissionMode,
   type SessionConfig
 } from "@agentev4/shared";
@@ -14,6 +16,7 @@ export interface ReadyWorkspace {
   activeSessionId: string;
   messages: AgentMessage[];
   tools: string[];
+  agentSettings: AgentSettings;
 }
 
 export type WorkspaceLifecycleAction =
@@ -57,7 +60,8 @@ function parseReadyWorkspace(value: unknown): ReadyWorkspace {
     sessions,
     activeSessionId: candidate.activeSessionId,
     messages,
-    tools: candidate.tools
+    tools: candidate.tools,
+    agentSettings: AgentSettingsSchema.parse(candidate.agentSettings)
   };
 }
 
@@ -98,6 +102,13 @@ export async function listSessionMessages(
   call: typeof callServer = callServer
 ): Promise<AgentMessage[]> {
   return AgentMessageSchema.array().parse(await call("listMessages", { sessionId }));
+}
+
+export async function saveAgentSettings(
+  input: AgentSettings,
+  call: typeof callServer = callServer
+): Promise<AgentSettings> {
+  return AgentSettingsSchema.parse(await call("saveAgentSettings", input));
 }
 
 export function createWorkspaceSelectionController(input: {

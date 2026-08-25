@@ -40,7 +40,8 @@ describe("prepareWorkspace", () => {
         sessions: [session("serialized", "2026-08-10T10:00:00.000Z")],
         activeSessionId: "serialized",
         messages: [message("from JSON")],
-        tools: ["FileSystem_Read"]
+        tools: ["FileSystem_Read"],
+        agentSettings: {}
       })
     ) as unknown;
     const calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
@@ -156,7 +157,8 @@ describe("workspace selection controller", () => {
       sessions: [session("new", "2026-08-10T10:00:00.000Z")],
       activeSessionId: "new",
       messages: [],
-      tools: []
+      tools: [],
+      agentSettings: {}
     });
     await first;
 

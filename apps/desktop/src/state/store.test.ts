@@ -19,7 +19,8 @@ const ready: ReadyWorkspace = {
   ],
   activeSessionId: "previous-session",
   messages: [],
-  tools: ["FileSystem_Read"]
+  tools: ["FileSystem_Read"],
+  agentSettings: {}
 };
 
 describe("workspace lifecycle reducer", () => {
@@ -43,6 +44,10 @@ describe("workspace lifecycle reducer", () => {
       type: "PROVIDER_CONFIG_COMMITTED",
       config: { provider: "openai", model: "gpt-5", baseUrl: "" }
     });
+    active = reducer(active, {
+      type: "AGENT_SETTINGS_COMMITTED",
+      settings: { systemPromptOverride: "Se breve." }
+    });
     active = reducer(active, { type: "SENDING_STARTED", runId: "run-before-crash" });
 
     const crashed = reducer(active, {
@@ -62,7 +67,8 @@ describe("workspace lifecycle reducer", () => {
       sending: false,
       activeRunId: null,
       error: "El servidor del agente se cerr\u00f3",
-      providerConfig: initialState.providerConfig
+      providerConfig: initialState.providerConfig,
+      agentSettings: initialState.agentSettings
     });
 
     const restarted = reducer(crashed, { type: "WORKSPACE_READY", ready });
@@ -167,17 +173,34 @@ describe("workspace lifecycle reducer", () => {
     expect(failed.error).toBe("init failed");
   });
 
-  it("interleaves thoughts and tool calls in a single chronological activity log", () => {
+  it("accumulates consecutive deltas with the same messageId into one growing bubble", () => {
     const active = reducer(initialState, { type: "WORKSPACE_READY", ready });
-    const afterThought = reducer(active, {
+    const afterFirst = reducer(active, {
+      type: "SERVER_EVENT",
+      event: { type: "agent:message_delta", sessionId: "previous-session", messageId: "msg-1", delta: "Voy a " }
+    });
+    const afterSecond = reducer(afterFirst, {
       type: "SERVER_EVENT",
       event: {
-        type: "agent:thought",
+        type: "agent:message_delta",
         sessionId: "previous-session",
-        content: "Voy a mirar el repo"
+        messageId: "msg-1",
+        delta: "mirar el repo"
       }
     });
-    const afterToolCall = reducer(afterThought, {
+
+    expect(afterSecond.activity).toEqual([
+      { kind: "assistant_delta", messageId: "msg-1", content: "Voy a mirar el repo" }
+    ]);
+  });
+
+  it("opens a new activity entry when the messageId changes (retry or next turn), and interleaves tool calls chronologically", () => {
+    const active = reducer(initialState, { type: "WORKSPACE_READY", ready });
+    const afterFirstTurn = reducer(active, {
+      type: "SERVER_EVENT",
+      event: { type: "agent:message_delta", sessionId: "previous-session", messageId: "msg-1", delta: "Voy a mirar el repo" }
+    });
+    const afterToolCall = reducer(afterFirstTurn, {
       type: "SERVER_EVENT",
       event: {
         type: "agent:tool_call",
@@ -185,10 +208,15 @@ describe("workspace lifecycle reducer", () => {
         toolCall: { id: "call-1", name: "FileSystem_Read", input: {} }
       }
     });
+    const afterRetry = reducer(afterToolCall, {
+      type: "SERVER_EVENT",
+      event: { type: "agent:message_delta", sessionId: "previous-session", messageId: "msg-2", delta: "Ya lo tengo" }
+    });
 
-    expect(afterToolCall.activity).toEqual([
-      { kind: "thought", content: "Voy a mirar el repo" },
-      { kind: "tool_call", toolCall: { id: "call-1", name: "FileSystem_Read", input: {} } }
+    expect(afterRetry.activity).toEqual([
+      { kind: "assistant_delta", messageId: "msg-1", content: "Voy a mirar el repo" },
+      { kind: "tool_call", toolCall: { id: "call-1", name: "FileSystem_Read", input: {} } },
+      { kind: "assistant_delta", messageId: "msg-2", content: "Ya lo tengo" }
     ]);
   });
 
@@ -196,7 +224,7 @@ describe("workspace lifecycle reducer", () => {
     const active = reducer(initialState, { type: "WORKSPACE_READY", ready });
     const withActivity = reducer(active, {
       type: "SERVER_EVENT",
-      event: { type: "agent:thought", sessionId: "previous-session", content: "..." }
+      event: { type: "agent:message_delta", sessionId: "previous-session", messageId: "msg-1", delta: "..." }
     });
 
     const started = reducer(withActivity, { type: "SENDING_STARTED", runId: "run-1" });
@@ -208,7 +236,7 @@ describe("workspace lifecycle reducer", () => {
     const active = reducer(initialState, { type: "WORKSPACE_READY", ready });
     const withActivity = reducer(active, {
       type: "SERVER_EVENT",
-      event: { type: "agent:thought", sessionId: "previous-session", content: "..." }
+      event: { type: "agent:message_delta", sessionId: "previous-session", messageId: "msg-1", delta: "..." }
     });
 
     const reconciled = reducer(withActivity, {

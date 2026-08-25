@@ -1,4 +1,4 @@
-import type { AgentInterface, AgentRunResult } from "@agentev4/shared";
+import type { AgentInterface, AgentRunInput, AgentRunResult } from "@agentev4/shared";
 import { describe, expect, it, vi } from "vitest";
 import { createResilientAgent, isRetryableError, withRetry } from "./retry.js";
 
@@ -116,5 +116,27 @@ describe("createResilientAgent (DoD Fase 10)", () => {
 
     await expect(agent.run(input)).rejects.toThrow("bad request");
     expect(secondaryRun).not.toHaveBeenCalled();
+  });
+
+  it("reenvía input.onDelta sin modificar a cada intento (el messageId que distingue intentos lo genera el adaptador, no el retry)", async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const deltaCalls: Array<[string, string]> = [];
+    const onDelta = (delta: string, messageId: string) => deltaCalls.push([delta, messageId]);
+    let attempt = 0;
+    const primaryRun = vi.fn(async (runInput: AgentRunInput) => {
+      attempt += 1;
+      runInput.onDelta?.(`intento-${attempt}`, `msg-${attempt}`);
+      if (attempt <= 1) throw rateLimitError();
+      return fakeResult("ok");
+    });
+
+    const agent = createResilientAgent(fakeAgent(primaryRun), undefined, { maxRetries: 2, sleep });
+    const result = await agent.run({ ...input, onDelta });
+
+    expect(result.message.content).toBe("ok");
+    expect(deltaCalls).toEqual([
+      ["intento-1", "msg-1"],
+      ["intento-2", "msg-2"]
+    ]);
   });
 });

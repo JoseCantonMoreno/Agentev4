@@ -1,12 +1,20 @@
 import { z } from "zod";
 import { ToolCallSchema } from "./tools.js";
 
-export const AgentThoughtEventSchema = z.object({
-  type: z.literal("agent:thought"),
+/**
+ * Fragmento incremental de texto de un turno del asistente en curso.
+ * `messageId` identifica el turno (y el intento, si hubo reintento tras un
+ * fallo transitorio): cada llamada al modelo genera uno nuevo, así que un
+ * `messageId` distinto le indica al consumidor que debe abrir una burbuja
+ * nueva en vez de seguir acumulando sobre la anterior.
+ */
+export const AgentMessageDeltaEventSchema = z.object({
+  type: z.literal("agent:message_delta"),
   sessionId: z.string(),
-  content: z.string()
+  messageId: z.string(),
+  delta: z.string()
 });
-export type AgentThoughtEvent = z.infer<typeof AgentThoughtEventSchema>;
+export type AgentMessageDeltaEvent = z.infer<typeof AgentMessageDeltaEventSchema>;
 
 export const AgentToolCallEventSchema = z.object({
   type: z.literal("agent:tool_call"),
@@ -48,7 +56,7 @@ export const AgentPermissionRequestEventSchema = z.object({
 export type AgentPermissionRequestEvent = z.infer<typeof AgentPermissionRequestEventSchema>;
 
 export const AgentIpcEventSchema = z.discriminatedUnion("type", [
-  AgentThoughtEventSchema,
+  AgentMessageDeltaEventSchema,
   AgentToolCallEventSchema,
   AgentContextUpdateEventSchema,
   AgentPermissionRequestEventSchema

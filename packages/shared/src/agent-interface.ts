@@ -19,6 +19,22 @@ export interface ToolDeclaration {
 export interface AgentRunInput {
   messages: AgentMessage[];
   governance: LoopGovernance;
+  /**
+   * Instrucciones de sistema para este turno. Si se omite, el adaptador usa
+   * su propio default (ver `DEFAULT_SYSTEM_PROMPT` en `@agentev4/core`).
+   * Va en `AgentRunInput` y no en `AgentFactory.create()` para no forzar a
+   * reconstruir el `Agent` cada vez que cambie (p.ej. el usuario lo edita en
+   * Ajustes a mitad de sesión).
+   */
+  systemPrompt?: string;
+  /**
+   * Callback opcional invocado con cada fragmento de texto según el modelo
+   * lo va generando. `messageId` identifica el turno/intento (ver
+   * `AgentMessageDeltaEvent` en `@agentev4/shared`): un adaptador que
+   * reintenta genera uno nuevo por intento para que el consumidor pueda
+   * descartar limpiamente el texto parcial de un intento fallido.
+   */
+  onDelta?: (delta: string, messageId: string) => void;
 }
 
 export interface AgentRunResult {

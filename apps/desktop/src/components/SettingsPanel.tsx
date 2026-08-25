@@ -7,6 +7,7 @@ import type {
   SavedProviderSettings
 } from "@agentev4/shared";
 import { callServer } from "../lib/ipc";
+import { saveAgentSettings } from "../lib/workspace";
 import { useAppState } from "../state/store";
 
 const PROVIDERS: LlmProviderName[] = [
@@ -44,8 +45,11 @@ export function SettingsPanel() {
   const [draft, setDraft] = useState<ProviderDraft>({ ...state.providerConfig, apiKey: "" });
   const [hasKey, setHasKey] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [promptDraft, setPromptDraft] = useState(state.agentSettings.systemPromptOverride ?? "");
+  const [promptSaving, setPromptSaving] = useState(false);
   const hasKeyRequest = useRef(0);
   const savingRef = useRef(false);
+  const promptSavingRef = useRef(false);
   const observedServerEpoch = useRef(state.serverEpoch);
   const apiKeyDraftRef = useRef<PreservedApiKey | null>(null);
 
@@ -60,6 +64,7 @@ export function SettingsPanel() {
     hasKeyRequest.current += 1;
     setHasKey(false);
     setDraft({ ...state.providerConfig, apiKey: "" });
+    setPromptDraft(state.agentSettings.systemPromptOverride ?? "");
   }, [state.serverEpoch, state.settingsOpen]);
 
   useEffect(() => {
@@ -131,6 +136,35 @@ export function SettingsPanel() {
     setHasKey(false);
     if (apiKeyDraftRef.current?.provider !== provider) apiKeyDraftRef.current = null;
     setDraft((current) => ({ ...current, provider, apiKey: "" }));
+  }
+
+  async function handleSavePrompt() {
+    if (promptSavingRef.current) return;
+    promptSavingRef.current = true;
+    setPromptSaving(true);
+    dispatch({ type: "ERROR_SET", error: null });
+    try {
+      const trimmed = promptDraft.trim();
+      const saved = await saveAgentSettings(trimmed ? { systemPromptOverride: trimmed } : {});
+      dispatch({ type: "AGENT_SETTINGS_COMMITTED", settings: saved });
+      setPromptDraft(saved.systemPromptOverride ?? "");
+      dispatch({
+        type: "NOTIFICATION_SET",
+        notification: {
+          id: crypto.randomUUID(),
+          kind: "success",
+          message: "Prompt de sistema guardado"
+        }
+      });
+    } catch (error) {
+      dispatch({
+        type: "ERROR_SET",
+        error: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      promptSavingRef.current = false;
+      setPromptSaving(false);
+    }
   }
 
   return (
@@ -225,6 +259,30 @@ export function SettingsPanel() {
             className="rounded-md bg-emerald-700 px-2 py-1 text-sm hover:bg-emerald-600 disabled:opacity-50"
           >
             {saving ? "Guardando…" : "Guardar configuración"}
+          </button>
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h3 className="text-sm font-medium text-neutral-300">Prompt de sistema</h3>
+          <label htmlFor="system-prompt" className="text-sm text-neutral-300">
+            Personalizado (opcional)
+          </label>
+          <textarea
+            id="system-prompt"
+            value={promptDraft}
+            onChange={(event) => setPromptDraft(event.target.value)}
+            disabled={promptSaving}
+            rows={5}
+            placeholder="Vacío = usa el prompt por defecto de Agentev4"
+            className="resize-y rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm"
+          />
+          <button
+            type="button"
+            onClick={() => void handleSavePrompt()}
+            disabled={promptSaving}
+            className="self-start rounded-md bg-emerald-700 px-2 py-1 text-sm hover:bg-emerald-600 disabled:opacity-50"
+          >
+            {promptSaving ? "Guardando…" : "Guardar prompt"}
           </button>
         </section>
 

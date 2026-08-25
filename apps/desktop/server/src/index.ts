@@ -12,6 +12,7 @@ import type {
   ToolCall
 } from "@agentev4/shared";
 import {
+  DEFAULT_SYSTEM_PROMPT,
   KeyStore,
   type CanUseTool,
   type PermissionDecision,
@@ -20,15 +21,16 @@ import {
   countContextTokens,
   createMastraAgentFactory,
   createResilientAgent,
-  runAgenticLoop
+  runAgenticLoop,
+  saveAgentSettings as persistAgentSettings
 } from "@agentev4/core";
 import { createStaticToolRegistry, executeRegisteredTool, toToolDeclarations, type McpConnection, type ToolRegistry } from "@agentev4/tools";
 import { closeMcpConnections, connectConfiguredMcpServers } from "./mcp-tools.js";
 import { saveProviderSettings } from "./provider-settings.js";
+import { loadWorkspaceRules } from "./rules-loader.js";
 import { encodeLine, isRpcRequest, parseLines, type RpcRequest } from "./protocol.js";
 import { switchWorkspace, type WorkspaceState } from "./workspace.js";
 
-const SYSTEM_PROMPT = "You are Agentev4, an autonomous coding agent.";
 // ponytail: sin tabla de límites por modelo todavía; sube a un lookup real
 // (proveedor+modelo -> max context) si el gauge necesita precisión por modelo.
 const MAX_CONTEXT_TOKENS = 200_000;
@@ -108,16 +110,39 @@ async function initWorkspace(input: Record<string, unknown> | undefined) {
   }
 }
 
-/** Envuelve el `AgentInterface` resiliente para emitir `agent:thought` en cada turno LLM. */
-function withThoughtEvents(
+/**
+ * Envuelve el `AgentInterface` resiliente para emitir `agent:context_update`
+ * al terminar cada turno LLM (antes se calculaba una sola vez, al final de
+ * todo el bucle multi-turno, así que el gauge de contexto no se movía
+ * durante la ejecución). No toca `input.onDelta`: el streaming token a
+ * token lo cablea directamente `runAgenticLoop` vía `AgentLoopParams.onDelta`.
+ */
+function withContextUpdateEvents(
   agent: AgentInterface,
   sessionId: string,
+  registry: ToolRegistry,
+  systemPrompt: string,
+  rules: string,
   emit: (event: AgentIpcEvent) => void
 ): AgentInterface {
   return {
     async run(input) {
       const result = await agent.run(input);
-      emit({ type: "agent:thought", sessionId, content: result.message.content });
+
+      const breakdown = countContextTokens({
+        systemPrompt,
+        rules,
+        tools: Object.keys(registry).join(","),
+        messages: [...input.messages, result.message]
+      });
+      emit({
+        type: "agent:context_update",
+        sessionId,
+        usedTokens: breakdown.total,
+        maxTokens: MAX_CONTEXT_TOKENS,
+        breakdown
+      });
+
       return result;
     },
     submitToolResult: (result) => agent.submitToolResult(result)
@@ -155,13 +180,22 @@ async function executePrompt(
     ...config,
     apiKey: state.keyStore.get(config.provider)
   };
+  const rules = await loadWorkspaceRules(requireWorkspacePath());
+  const basePrompt = state.agentSettings?.systemPromptOverride?.trim() || DEFAULT_SYSTEM_PROMPT;
+  const systemPrompt = rules
+    ? `${basePrompt}\n\nProject rules (.agente/rules.md):\n${rules}`
+    : basePrompt;
+
   const registry = state.toolRegistry;
-  const agent = withThoughtEvents(
+  const agent = withContextUpdateEvents(
     createResilientAgent(
       createMastraAgentFactory().create(providerConfig, toToolDeclarations(registry)),
       undefined
     ),
     params.sessionId,
+    registry,
+    basePrompt,
+    rules,
     emit
   );
 
@@ -190,26 +224,15 @@ async function executePrompt(
     mode: session.mode,
     messages: priorMessages,
     governance: DEFAULT_GOVERNANCE,
-    executeTool
+    executeTool,
+    systemPrompt,
+    onDelta: (delta, messageId) =>
+      emit({ type: "agent:message_delta", sessionId: params.sessionId, messageId, delta })
   });
 
   for (const message of result.messages.slice(priorMessages.length)) {
     sessionManager.appendMessage(params.sessionId, message);
   }
-
-  const breakdown = countContextTokens({
-    systemPrompt: SYSTEM_PROMPT,
-    rules: "",
-    tools: Object.keys(registry).join(","),
-    messages: result.messages
-  });
-  emit({
-    type: "agent:context_update",
-    sessionId: params.sessionId,
-    usedTokens: breakdown.total,
-    maxTokens: MAX_CONTEXT_TOKENS,
-    breakdown
-  });
 
   return { haltReason: result.haltReason, turnsUsed: result.turnsUsed };
 }
@@ -292,6 +315,11 @@ export const handlers: Record<string, Handler> = {
   saveProviderSettings: async (p) => {
     const saved = saveProviderSettings(state.keyStore, p);
     state.providerSettings = saved.config;
+    return saved;
+  },
+  saveAgentSettings: async (p) => {
+    const saved = await persistAgentSettings(requireWorkspacePath(), p);
+    state.agentSettings = saved;
     return saved;
   },
   respondPermission: async (p) => {

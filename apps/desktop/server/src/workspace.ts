@@ -1,12 +1,20 @@
 import { mkdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { type DatabaseHandle, SessionManager, openDatabase } from "@agentev4/core";
-import type { AgentMessage, AgentMode, PermissionMode, SessionConfig } from "@agentev4/shared";
+import { type DatabaseHandle, SessionManager, loadAgentSettings, openDatabase } from "@agentev4/core";
+import type {
+  AgentMessage,
+  AgentMode,
+  AgentSettings,
+  PermissionMode,
+  SessionConfig
+} from "@agentev4/shared";
 
 export interface WorkspaceState {
   workspacePath?: string;
   dbHandle?: DatabaseHandle;
   sessionManager?: SessionManager;
+  /** Ajustes del agente para el workspace actual (`.agente/settings.json`, Fase 2). */
+  agentSettings?: AgentSettings;
 }
 
 export interface ReadyWorkspace {
@@ -15,6 +23,7 @@ export interface ReadyWorkspace {
   activeSessionId: string;
   messages: AgentMessage[];
   tools: string[];
+  agentSettings: AgentSettings;
 }
 
 export interface WorkspacePreparation {
@@ -76,13 +85,15 @@ export async function switchWorkspace(
     const activeSessionId = sessions[0]!.id;
     const messages = nextManager.listMessages(activeSessionId);
     const tools = await preparation.listTools();
-    const ready = { workspacePath, sessions, activeSessionId, messages, tools };
+    const agentSettings = await loadAgentSettings(workspacePath);
+    const ready = { workspacePath, sessions, activeSessionId, messages, tools, agentSettings };
 
     preparation.beforeCommit?.();
     state.dbHandle?.close();
     state.workspacePath = workspacePath;
     state.dbHandle = nextHandle;
     state.sessionManager = nextManager;
+    state.agentSettings = agentSettings;
     committed = true;
     return ready;
   } finally {

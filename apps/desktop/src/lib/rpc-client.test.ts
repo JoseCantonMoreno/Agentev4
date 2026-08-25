@@ -88,7 +88,7 @@ describe("RpcClient", () => {
     await factory.started();
 
     factory.stdout(
-      '{"type":"agent:thought","sessionId":"session-1","apiKey":"secret-not-observable"}\n'
+      '{"type":"agent:message_delta","sessionId":"session-1","apiKey":"secret-not-observable"}\n'
     );
     await expect(pending).rejects.toThrow("protocolo RPC inv\u00e1lido");
     expect(eventListener).not.toHaveBeenCalled();
@@ -151,17 +151,22 @@ describe("RpcClient", () => {
     const pending = client.call("ping");
     await factory.started();
 
-    factory.stdout('{"type":"agent:thought","sessionId":"session-1","content":"hello"}\n');
+    factory.stdout(
+      '{"type":"agent:message_delta","sessionId":"session-1","messageId":"msg-1","delta":"hello"}\n'
+    );
     unsubscribe();
-    factory.stdout('{"type":"agent:thought","sessionId":"session-1","content":"ignored"}\n');
+    factory.stdout(
+      '{"type":"agent:message_delta","sessionId":"session-1","messageId":"msg-1","delta":"ignored"}\n'
+    );
     factory.stdout('{"id":1,"result":null}\n');
 
     await expect(pending).resolves.toBeNull();
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener).toHaveBeenCalledWith({
-      type: "agent:thought",
+      type: "agent:message_delta",
       sessionId: "session-1",
-      content: "hello"
+      messageId: "msg-1",
+      delta: "hello"
     });
   });
 

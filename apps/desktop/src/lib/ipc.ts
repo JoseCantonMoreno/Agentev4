@@ -1,10 +1,12 @@
 import { Command } from "@tauri-apps/plugin-shell";
 import {
   AgentMessageSchema,
+  AgentSettingsSchema,
   SavedProviderSettingsSchema,
   SessionConfigSchema,
   type AgentIpcEvent,
   type AgentMessage,
+  type AgentSettings,
   type SavedProviderSettings,
   type SessionConfig
 } from "@agentev4/shared";
@@ -27,6 +29,7 @@ interface ReadyWorkspaceResult {
   activeSessionId: string;
   messages: AgentMessage[];
   tools: string[];
+  agentSettings: AgentSettings;
 }
 
 interface RpcResultMap {
@@ -42,6 +45,7 @@ interface RpcResultMap {
   setApiKey: { ok: true };
   hasApiKey: { hasKey: boolean };
   saveProviderSettings: SavedProviderSettings;
+  saveAgentSettings: AgentSettings;
   respondPermission: { ok: true };
   sendPrompt: { haltReason: string; turnsUsed: number };
 }
@@ -58,6 +62,7 @@ const NON_EXPIRING_METHODS = new Set([
   "deleteSession",
   "restoreCheckpoint",
   "saveProviderSettings",
+  "saveAgentSettings",
   "setApiKey",
   "respondPermission"
 ]);
@@ -90,7 +95,8 @@ function parseReadyWorkspace(value: unknown): unknown {
     ...value,
     sessions: SessionConfigSchema.array().parse(value.sessions),
     messages: AgentMessageSchema.array().parse(value.messages),
-    tools: parseStringArray(value.tools)
+    tools: parseStringArray(value.tools),
+    agentSettings: AgentSettingsSchema.parse(value.agentSettings)
   };
 }
 
@@ -136,6 +142,7 @@ const responseValidators = {
   setApiKey: parseOk,
   hasApiKey: parseHasKey,
   saveProviderSettings: parseSavedProviderSettings,
+  saveAgentSettings: (value) => AgentSettingsSchema.parse(value),
   respondPermission: parseOk,
   sendPrompt: parsePromptResult
 } satisfies Record<RpcMethod, Validator>;

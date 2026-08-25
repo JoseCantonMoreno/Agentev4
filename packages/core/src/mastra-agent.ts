@@ -13,10 +13,11 @@ import type {
   ToolDeclaration
 } from "@agentev4/shared";
 import { resolveLanguageModel } from "./providers.js";
+import { DEFAULT_SYSTEM_PROMPT } from "./system-prompt.js";
 
 /**
  * Traduce `ToolDeclaration[]` (Fase 1, agnóstico de Mastra) a `Tool`s de
- * Mastra para que el LLM las vea al llamar `agent.generate()`. Deliberadamente
+ * Mastra para que el LLM las vea al llamar `agent.stream()`. Deliberadamente
  * sin `execute`: con `maxSteps: 1` el `Agent` nunca correría la tool él mismo,
  * y si en el futuro se sube `maxSteps`, un `execute` aquí la ejecutaría por
  * duplicado junto al orquestador externo (`agent-loop.ts`), que es quien debe
@@ -73,32 +74,49 @@ export class MastraAgentAdapter implements AgentInterface {
     this.agent = new Agent({
       id: `agentev4-${config.provider}`,
       name: `Agentev4 (${config.provider})`,
-      instructions: "You are Agentev4, an autonomous coding agent.",
+      instructions: DEFAULT_SYSTEM_PROMPT,
       model: resolveLanguageModel(config),
       tools: toMastraTools(tools)
     });
   }
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
-    const result = await this.agent.generate(toModelMessages(input.messages), {
-      maxSteps: 1
+    // `instructions` por ejecución sobrescribe el default del constructor
+    // (confirmado en @mastra/core@1.57.0) sin reconstruir el Agent; un
+    // `systemPrompt` vacío/ausente deja el default tal cual.
+    const stream = await this.agent.stream(toModelMessages(input.messages), {
+      maxSteps: 1,
+      ...(input.systemPrompt ? { instructions: input.systemPrompt } : {})
     });
+
+    // `stream.messageId` es propio de esta llamada a Mastra: un reintento
+    // (createResilientAgent) vuelve a invocar `run()` y produce uno nuevo,
+    // así que el consumidor de `onDelta` nunca mezcla texto de dos intentos.
+    for await (const delta of stream.textStream) {
+      input.onDelta?.(delta, stream.messageId);
+    }
+
+    const [text, toolCalls, finishReason] = await Promise.all([
+      stream.text,
+      stream.toolCalls,
+      stream.finishReason
+    ]);
 
     return {
       message: {
         id: randomUUID(),
         role: "assistant",
-        content: result.text,
+        content: text,
         createdAt: new Date()
       },
-      toolCalls: result.toolCalls.map((call) => ({
+      toolCalls: toolCalls.map((call) => ({
         id: call.payload.toolCallId,
         name: call.payload.toolName,
         input: (call.payload.args ?? {}) as Record<string, unknown>
       })),
-      stopReason: toStopReason(result.finishReason),
-      // ponytail: sin tabla de precios por modelo todavía; el coste real
-      // llega en Fase 10 (multiproveedor/resiliencia). El corte por
+      stopReason: toStopReason(finishReason),
+      // ponytail: sin tabla de precios por modelo todavía (llega en Fase 5,
+      // que ya podrá leer `stream.usage` aquí mismo). El corte por
       // max_budget_usd ya es testeable con un AgentInterface simulado.
       costUsd: 0
     };

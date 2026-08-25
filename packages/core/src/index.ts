@@ -1,5 +1,7 @@
 export * from "./agent-loop.js";
+export * from "./agent-settings.js";
 export * from "./mastra-agent.js";
+export * from "./system-prompt.js";
 export * from "./providers.js";
 export * from "./permission-engine.js";
 export * from "./db/client.js";

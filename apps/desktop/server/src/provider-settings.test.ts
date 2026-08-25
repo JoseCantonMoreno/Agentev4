@@ -15,7 +15,16 @@ interface RunLoopResult {
 const testState: {
   providerConfigs: Array<Record<string, unknown>>;
   runLoopOverride: ((messages: unknown[]) => Promise<RunLoopResult>) | undefined;
-} = { providerConfigs: [], runLoopOverride: undefined };
+  deltaToEmit: { delta: string; messageId: string } | undefined;
+  agentSettings: Record<string, unknown>;
+  receivedSystemPrompts: Array<string | undefined>;
+} = {
+  providerConfigs: [],
+  runLoopOverride: undefined,
+  deltaToEmit: undefined,
+  agentSettings: {},
+  receivedSystemPrompts: []
+};
 
 function deferred<Value>() {
   let resolve: (value: Value) => void;
@@ -101,21 +110,36 @@ function mockServerDependencies(): void {
       openDatabase: () => ({ db: {}, close: () => undefined }),
       PermissionEngine: class {},
       countContextTokens: () => ({ total: 0 }),
+      DEFAULT_SYSTEM_PROMPT: "You are a test agent.",
+      loadAgentSettings: async () => testState.agentSettings,
+      saveAgentSettings: async (_workspacePath: string, input: Record<string, unknown>) => {
+        testState.agentSettings = input;
+        return testState.agentSettings;
+      },
       createMastraAgentFactory: () => ({
         create(config: Record<string, unknown>) {
           testState.providerConfigs.push(config);
           return {
-            run: async () => ({
-              message: {
-                id: "assistant-message",
-                role: "assistant",
-                content: "configured response",
-                createdAt: new Date()
-              },
-              toolCalls: [],
-              stopReason: "end_turn",
-              costUsd: 0
-            }),
+            run: async (input: {
+              systemPrompt?: string;
+              onDelta?: (delta: string, messageId: string) => void;
+            }) => {
+              testState.receivedSystemPrompts.push(input.systemPrompt);
+              if (testState.deltaToEmit) {
+                input.onDelta?.(testState.deltaToEmit.delta, testState.deltaToEmit.messageId);
+              }
+              return {
+                message: {
+                  id: "assistant-message",
+                  role: "assistant",
+                  content: "configured response",
+                  createdAt: new Date()
+                },
+                toolCalls: [],
+                stopReason: "end_turn",
+                costUsd: 0
+              };
+            },
             submitToolResult: async () => undefined
           };
         }
@@ -123,13 +147,17 @@ function mockServerDependencies(): void {
       createResilientAgent: <T>(agent: T) => agent,
       runAgenticLoop: async ({
         agent,
-        messages
+        messages,
+        systemPrompt,
+        onDelta
       }: {
         agent: { run(input: unknown): Promise<{ message: unknown; stopReason: string }> };
         messages: unknown[];
+        systemPrompt?: string;
+        onDelta?: (delta: string, messageId: string) => void;
       }) => {
         if (testState.runLoopOverride) return testState.runLoopOverride(messages);
-        const result = await agent.run({ messages });
+        const result = await agent.run({ messages, systemPrompt, onDelta });
         return {
           messages: [...messages, result.message],
           haltReason: result.stopReason,
@@ -166,6 +194,9 @@ function getHandler(handlers: Record<string, unknown>, method: string) {
 async function loadHandlers() {
   testState.providerConfigs = [];
   testState.runLoopOverride = undefined;
+  testState.deltaToEmit = undefined;
+  testState.agentSettings = {};
+  testState.receivedSystemPrompts = [];
   vi.resetModules();
   mockServerDependencies();
   return (await import("./index.js")).handlers;
@@ -490,6 +521,69 @@ describe("saveProviderSettings", () => {
       ).resolves.toMatchObject({ haltReason: "end_turn", turnsUsed: 1 });
       expect(testState.providerConfigs).toEqual([
         { provider: "ollama", model: "saved-model", baseUrl: savedBaseUrl, apiKey: undefined }
+      ]);
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true });
+    }
+  });
+
+  it("emits agent:message_delta as the agent streams, tagged with the turn's messageId", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "agentev4-delta-stream-"));
+    try {
+      const handlers = await loadHandlers();
+      const session = await createSession(handlers, workspacePath);
+      await getHandler(handlers, "saveProviderSettings")(
+        { provider: "ollama", model: "saved-model", baseUrl: "" },
+        () => undefined
+      );
+      testState.deltaToEmit = { delta: "Hola desde streaming", messageId: "turn-1" };
+
+      const events: Array<Record<string, unknown>> = [];
+      await getHandler(handlers, "sendPrompt")(
+        { sessionId: session.id, prompt: "hola" },
+        (event) => events.push(event as Record<string, unknown>)
+      );
+
+      expect(events).toContainEqual({
+        type: "agent:message_delta",
+        sessionId: session.id,
+        messageId: "turn-1",
+        delta: "Hola desde streaming"
+      });
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the default system prompt until the user saves an override, then uses that instead (Fase 2/3)", async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), "agentev4-system-prompt-"));
+    try {
+      const handlers = await loadHandlers();
+      const session = await createSession(handlers, workspacePath);
+      await getHandler(handlers, "saveProviderSettings")(
+        { provider: "ollama", model: "saved-model", baseUrl: "" },
+        () => undefined
+      );
+
+      await getHandler(handlers, "sendPrompt")(
+        { sessionId: session.id, prompt: "primero" },
+        () => undefined
+      );
+      expect(testState.receivedSystemPrompts).toEqual(["You are a test agent."]);
+
+      const saved = await getHandler(handlers, "saveAgentSettings")(
+        { systemPromptOverride: "Responde siempre en una sola frase." },
+        () => undefined
+      );
+      expect(saved).toEqual({ systemPromptOverride: "Responde siempre en una sola frase." });
+
+      await getHandler(handlers, "sendPrompt")(
+        { sessionId: session.id, prompt: "segundo" },
+        () => undefined
+      );
+      expect(testState.receivedSystemPrompts).toEqual([
+        "You are a test agent.",
+        "Responde siempre en una sola frase."
       ]);
     } finally {
       await rm(workspacePath, { recursive: true, force: true });
