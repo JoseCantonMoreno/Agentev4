@@ -19,7 +19,8 @@ const ready: ReadyWorkspace = {
   ],
   activeSessionId: "previous-session",
   messages: [],
-  tools: ["FileSystem_Read"]
+  tools: ["FileSystem_Read"],
+  agentSettings: {}
 };
 
 describe("workspace lifecycle reducer", () => {
@@ -43,6 +44,10 @@ describe("workspace lifecycle reducer", () => {
       type: "PROVIDER_CONFIG_COMMITTED",
       config: { provider: "openai", model: "gpt-5", baseUrl: "" }
     });
+    active = reducer(active, {
+      type: "AGENT_SETTINGS_COMMITTED",
+      settings: { systemPromptOverride: "Se breve." }
+    });
     active = reducer(active, { type: "SENDING_STARTED", runId: "run-before-crash" });
 
     const crashed = reducer(active, {
@@ -62,7 +67,8 @@ describe("workspace lifecycle reducer", () => {
       sending: false,
       activeRunId: null,
       error: "El servidor del agente se cerr\u00f3",
-      providerConfig: initialState.providerConfig
+      providerConfig: initialState.providerConfig,
+      agentSettings: initialState.agentSettings
     });
 
     const restarted = reducer(crashed, { type: "WORKSPACE_READY", ready });

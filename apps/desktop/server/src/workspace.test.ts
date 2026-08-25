@@ -1,4 +1,4 @@
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase } from "@agentev4/core";
@@ -37,6 +37,27 @@ describe("switchWorkspace", () => {
       expect(result.activeSessionId).toBe(result.sessions[0]?.id);
       expect(result.messages).toEqual([]);
       expect(result.tools).toEqual(["FileSystem_Read"]);
+      expect(result.agentSettings).toEqual({});
+    } finally {
+      state.dbHandle?.close();
+    }
+  });
+
+  it("loads a saved .agente/settings.json into both the response and the state (Fase 2)", async () => {
+    const directory = await createWorkspace();
+    await mkdir(join(directory, ".agente"), { recursive: true });
+    await writeFile(
+      join(directory, ".agente", "settings.json"),
+      JSON.stringify({ systemPromptOverride: "Sé breve y directo." }),
+      "utf8"
+    );
+    const state: WorkspaceState = {};
+
+    try {
+      const result = await switchWorkspace(state, directory, preparation);
+
+      expect(result.agentSettings).toEqual({ systemPromptOverride: "Sé breve y directo." });
+      expect(state.agentSettings).toEqual({ systemPromptOverride: "Sé breve y directo." });
     } finally {
       state.dbHandle?.close();
     }

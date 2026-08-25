@@ -402,3 +402,41 @@ describe("provider settings save flow", () => {
     expect((screen.getByLabelText("API key") as HTMLInputElement).value).toBe("");
   });
 });
+
+describe("system prompt save flow (Fase 2/3)", () => {
+  it("saves a trimmed override and shows a success notification", async () => {
+    vi.mocked(callServer).mockImplementation(async (method, params) => {
+      if (method === "hasApiKey") return { hasKey: false };
+      if (method === "saveAgentSettings") return params as { systemPromptOverride?: string };
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    const user = userEvent.setup();
+
+    render(<SettingsHarness />);
+    await user.type(screen.getByLabelText("Personalizado (opcional)"), "  Sé breve.  ");
+    await user.click(screen.getByRole("button", { name: "Guardar prompt" }));
+    await screen.findByText("Prompt de sistema guardado");
+
+    expect(
+      vi.mocked(callServer).mock.calls.filter(([method]) => method === "saveAgentSettings")
+    ).toEqual([["saveAgentSettings", { systemPromptOverride: "Sé breve." }]]);
+  });
+
+  it("clearing the field reverts to the default prompt instead of saving an empty string", async () => {
+    vi.mocked(callServer).mockImplementation(async (method, params) => {
+      if (method === "hasApiKey") return { hasKey: false };
+      if (method === "saveAgentSettings") return params as { systemPromptOverride?: string };
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    const user = userEvent.setup();
+
+    render(<SettingsHarness />);
+    await user.type(screen.getByLabelText("Personalizado (opcional)"), "   ");
+    await user.click(screen.getByRole("button", { name: "Guardar prompt" }));
+    await screen.findByText("Prompt de sistema guardado");
+
+    expect(
+      vi.mocked(callServer).mock.calls.filter(([method]) => method === "saveAgentSettings")
+    ).toEqual([["saveAgentSettings", {}]]);
+  });
+});

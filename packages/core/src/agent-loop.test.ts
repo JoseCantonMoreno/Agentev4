@@ -161,4 +161,25 @@ describe("runAgenticLoop", () => {
       ["mundo", "msg-1"]
     ]);
   });
+
+  it("forwards systemPrompt to every turn's agent.run() call", async () => {
+    const receivedPrompts: Array<string | undefined> = [];
+    const agent: AgentInterface = {
+      async run(input) {
+        receivedPrompts.push(input.systemPrompt);
+        return { message: assistantMessage("ok"), toolCalls: [], stopReason: "end_turn", costUsd: 0 };
+      },
+      async submitToolResult(): Promise<void> {}
+    };
+
+    await runAgenticLoop({
+      agent,
+      mode: "assistant",
+      messages: baseMessages(),
+      governance: baseGovernance(),
+      systemPrompt: "Custom instructions"
+    });
+
+    expect(receivedPrompts).toEqual(["Custom instructions"]);
+  });
 });

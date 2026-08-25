@@ -12,6 +12,7 @@ import type {
   ToolCall
 } from "@agentev4/shared";
 import {
+  DEFAULT_SYSTEM_PROMPT,
   KeyStore,
   type CanUseTool,
   type PermissionDecision,
@@ -20,15 +21,16 @@ import {
   countContextTokens,
   createMastraAgentFactory,
   createResilientAgent,
-  runAgenticLoop
+  runAgenticLoop,
+  saveAgentSettings as persistAgentSettings
 } from "@agentev4/core";
 import { createStaticToolRegistry, executeRegisteredTool, toToolDeclarations, type McpConnection, type ToolRegistry } from "@agentev4/tools";
 import { closeMcpConnections, connectConfiguredMcpServers } from "./mcp-tools.js";
 import { saveProviderSettings } from "./provider-settings.js";
+import { loadWorkspaceRules } from "./rules-loader.js";
 import { encodeLine, isRpcRequest, parseLines, type RpcRequest } from "./protocol.js";
 import { switchWorkspace, type WorkspaceState } from "./workspace.js";
 
-const SYSTEM_PROMPT = "You are Agentev4, an autonomous coding agent.";
 // ponytail: sin tabla de límites por modelo todavía; sube a un lookup real
 // (proveedor+modelo -> max context) si el gauge necesita precisión por modelo.
 const MAX_CONTEXT_TOKENS = 200_000;
@@ -119,6 +121,8 @@ function withContextUpdateEvents(
   agent: AgentInterface,
   sessionId: string,
   registry: ToolRegistry,
+  systemPrompt: string,
+  rules: string,
   emit: (event: AgentIpcEvent) => void
 ): AgentInterface {
   return {
@@ -126,8 +130,8 @@ function withContextUpdateEvents(
       const result = await agent.run(input);
 
       const breakdown = countContextTokens({
-        systemPrompt: SYSTEM_PROMPT,
-        rules: "",
+        systemPrompt,
+        rules,
         tools: Object.keys(registry).join(","),
         messages: [...input.messages, result.message]
       });
@@ -176,6 +180,12 @@ async function executePrompt(
     ...config,
     apiKey: state.keyStore.get(config.provider)
   };
+  const rules = await loadWorkspaceRules(requireWorkspacePath());
+  const basePrompt = state.agentSettings?.systemPromptOverride?.trim() || DEFAULT_SYSTEM_PROMPT;
+  const systemPrompt = rules
+    ? `${basePrompt}\n\nProject rules (.agente/rules.md):\n${rules}`
+    : basePrompt;
+
   const registry = state.toolRegistry;
   const agent = withContextUpdateEvents(
     createResilientAgent(
@@ -184,6 +194,8 @@ async function executePrompt(
     ),
     params.sessionId,
     registry,
+    basePrompt,
+    rules,
     emit
   );
 
@@ -213,6 +225,7 @@ async function executePrompt(
     messages: priorMessages,
     governance: DEFAULT_GOVERNANCE,
     executeTool,
+    systemPrompt,
     onDelta: (delta, messageId) =>
       emit({ type: "agent:message_delta", sessionId: params.sessionId, messageId, delta })
   });
@@ -302,6 +315,11 @@ export const handlers: Record<string, Handler> = {
   saveProviderSettings: async (p) => {
     const saved = saveProviderSettings(state.keyStore, p);
     state.providerSettings = saved.config;
+    return saved;
+  },
+  saveAgentSettings: async (p) => {
+    const saved = await persistAgentSettings(requireWorkspacePath(), p);
+    state.agentSettings = saved;
     return saved;
   },
   respondPermission: async (p) => {

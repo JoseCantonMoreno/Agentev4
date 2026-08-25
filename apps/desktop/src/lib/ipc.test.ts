@@ -10,6 +10,7 @@ describe("RPC method contracts", () => {
     "deleteSession",
     "restoreCheckpoint",
     "saveProviderSettings",
+    "saveAgentSettings",
     "setApiKey",
     "respondPermission"
   ])("does not apply a consumer timeout to mutating method %s", (method) => {
@@ -31,5 +32,34 @@ describe("RPC method contracts", () => {
         apiKey: "must-never-cross-the-protocol"
       })
     ).toThrow("Respuesta RPC inv\u00e1lida para saveProviderSettings");
+  });
+
+  it("validates and round-trips saveAgentSettings", () => {
+    expect(
+      validateRpcResult("saveAgentSettings", { systemPromptOverride: "Se breve." })
+    ).toEqual({ systemPromptOverride: "Se breve." });
+    expect(() =>
+      validateRpcResult("saveAgentSettings", { systemPromptOverride: 42 })
+    ).toThrow("Respuesta RPC inv\u00e1lida para saveAgentSettings");
+  });
+
+  it("validates the agentSettings field on initWorkspace and rejects a leaked apiKey there too", () => {
+    const readyWorkspace = {
+      workspacePath: "C:\\repo",
+      activeSessionId: "session-1",
+      sessions: [],
+      messages: [],
+      tools: [],
+      agentSettings: { systemPromptOverride: "Se breve." }
+    };
+    expect(validateRpcResult("initWorkspace", readyWorkspace)).toMatchObject({
+      agentSettings: { systemPromptOverride: "Se breve." }
+    });
+    expect(() =>
+      validateRpcResult("initWorkspace", {
+        ...readyWorkspace,
+        agentSettings: { systemPromptOverride: "ok", apiKey: "must-never-cross-the-protocol" }
+      })
+    ).toThrow("Respuesta RPC inv\u00e1lida para initWorkspace");
   });
 });

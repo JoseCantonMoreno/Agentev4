@@ -6,7 +6,8 @@ import {
   LlmProviderConfigSchema,
   InitWorkspaceInputSchema,
   SessionConfigSchema,
-  AgentIpcEventSchema
+  AgentIpcEventSchema,
+  AgentSettingsSchema
 } from "./index.js";
 
 describe("packages/shared schemas", () => {
@@ -113,5 +114,20 @@ describe("packages/shared schemas", () => {
     expect(() =>
       AgentIpcEventSchema.parse({ type: "agent:message_delta", sessionId: "s1", delta: "Hola" })
     ).toThrow();
+  });
+
+  it("parsea AgentSettings con override y sin él (Fase 2)", () => {
+    expect(AgentSettingsSchema.parse({})).toEqual({});
+    expect(AgentSettingsSchema.parse({ systemPromptOverride: "Sé breve." })).toEqual({
+      systemPromptOverride: "Sé breve."
+    });
+  });
+
+  it("AgentSettings descarta campos desconocidos como apiKey (nunca debe persistirse ahí)", () => {
+    const parsed = AgentSettingsSchema.parse({
+      systemPromptOverride: "ok",
+      apiKey: "sk-should-be-stripped"
+    });
+    expect(parsed).not.toHaveProperty("apiKey");
   });
 });

@@ -46,7 +46,8 @@ function readyWorkspaceFixture(): ReadyWorkspace {
     ],
     activeSessionId: "session-1",
     messages: [],
-    tools: []
+    tools: [],
+    agentSettings: {}
   };
 }
 

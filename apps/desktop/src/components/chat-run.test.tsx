@@ -42,7 +42,8 @@ const ready: ReadyWorkspace = {
   ],
   activeSessionId: "session-1",
   messages: [],
-  tools: []
+  tools: [],
+  agentSettings: {}
 };
 
 function ReadyState() {
