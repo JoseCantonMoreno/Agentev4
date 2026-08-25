@@ -5,10 +5,10 @@ import type {
   AgentMessage,
   AgentMode,
   AgentPermissionRequestEvent,
-  AgentToolCallEvent,
   LlmProviderName,
   PermissionMode,
-  SessionConfig
+  SessionConfig,
+  ToolCall
 } from "@agentev4/shared";
 import { onServerEvent, onServerLifecycle } from "../lib/ipc";
 import type { WorkspaceLifecycleAction } from "../lib/workspace";
@@ -25,14 +25,23 @@ export interface AppNotification {
   message: string;
 }
 
+/**
+ * Registro cronológico único de lo que el agente va haciendo durante un
+ * turno en curso (pensamientos + tool calls intercalados en el orden real
+ * de llegada). Vive solo mientras `sending` es true: se limpia al empezar
+ * un prompt nuevo y al llegar el refetch autoritativo de `state.messages`.
+ */
+export type ActivityEntry =
+  | { kind: "thought"; content: string }
+  | { kind: "tool_call"; toolCall: ToolCall };
+
 export interface AppState {
   workspacePath: string | null;
   workspaceStatus: "idle" | "selecting" | "preparing" | "ready";
   sessions: SessionConfig[];
   activeSessionId: string | null;
   messages: AgentMessage[];
-  thoughts: string[];
-  toolCalls: AgentToolCallEvent[];
+  activity: ActivityEntry[];
   context: AgentContextUpdateEvent | null;
   pendingPermission: AgentPermissionRequestEvent | null;
   settingsOpen: boolean;
@@ -79,8 +88,7 @@ export const initialState: AppState = {
   sessions: [],
   activeSessionId: null,
   messages: [],
-  thoughts: [],
-  toolCalls: [],
+  activity: [],
   context: null,
   pendingPermission: null,
   settingsOpen: false,
@@ -123,8 +131,7 @@ export function reducer(state: AppState, action: Action): AppState {
         activeSessionId: action.ready.activeSessionId,
         messages: action.ready.messages,
         availableTools: action.ready.tools,
-        thoughts: [],
-        toolCalls: [],
+        activity: [],
         context: null,
         pendingPermission: null,
         error: null
@@ -154,16 +161,18 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         activeSessionId: action.sessionId,
         messages: action.messages,
-        thoughts: [],
-        toolCalls: [],
+        activity: [],
         context: null
       };
     case "MESSAGES_SET":
       if (action.sessionId !== state.activeSessionId) return state;
-      return { ...state, messages: action.messages };
+      // El refetch autoritativo ya trae assistant/tool intercalados
+      // (agent-loop.ts los persiste en orden); el registro en vivo que lo
+      // precedió queda redundante y se descarta para no duplicar el hilo.
+      return { ...state, messages: action.messages, activity: [] };
     case "SENDING_STARTED":
       if (state.activeRunId) return state;
-      return { ...state, sending: true, activeRunId: action.runId };
+      return { ...state, sending: true, activeRunId: action.runId, activity: [] };
     case "SENDING_FINISHED":
       if (state.activeRunId !== action.runId) return state;
       return { ...state, sending: false, activeRunId: null };
@@ -175,8 +184,7 @@ export function reducer(state: AppState, action: Action): AppState {
         sessions: [],
         activeSessionId: null,
         messages: [],
-        thoughts: [],
-        toolCalls: [],
+        activity: [],
         context: null,
         pendingPermission: null,
         sending: false,
@@ -220,9 +228,15 @@ export function reducer(state: AppState, action: Action): AppState {
       if (event.sessionId !== state.activeSessionId) return state;
       switch (event.type) {
         case "agent:thought":
-          return { ...state, thoughts: [...state.thoughts, event.content] };
+          return {
+            ...state,
+            activity: [...state.activity, { kind: "thought", content: event.content }]
+          };
         case "agent:tool_call":
-          return { ...state, toolCalls: [...state.toolCalls, event] };
+          return {
+            ...state,
+            activity: [...state.activity, { kind: "tool_call", toolCall: event.toolCall }]
+          };
         case "agent:context_update":
           return { ...state, context: event };
         case "agent:permission_request":
